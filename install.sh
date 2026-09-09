@@ -217,11 +217,17 @@ render_template() {
 }
 
 write_server_env() {
-   local old_port old_host
+   local old_port old_host old_secret old_discovery old_client_id old_client_secret old_admins
    old_port="$(read_env_value "$LCS_SERVER_ENV" LCS_SERVER_PORT)"
    old_host="$(read_env_value "$LCS_SERVER_ENV" LCS_SERVER_HOST)"
+   old_secret="$(read_env_value "$LCS_SERVER_ENV" LCS_SECRET_KEY)"
+   old_discovery="$(read_env_value "$LCS_SERVER_ENV" LCS_OIDC_DISCOVERY_URL)"
+   old_client_id="$(read_env_value "$LCS_SERVER_ENV" LCS_OIDC_CLIENT_ID)"
+   old_client_secret="$(read_env_value "$LCS_SERVER_ENV" LCS_OIDC_CLIENT_SECRET)"
+   old_admins="$(read_env_value "$LCS_SERVER_ENV" LCS_ADMIN_USERS)"
    [ -z "$old_port" ] && old_port=5000
    [ -z "$old_host" ] && old_host=127.0.0.1
+   [ -z "$old_secret" ] && old_secret="$(openssl rand -hex 32)"
 
    cat > "$LCS_SERVER_ENV" <<EOF2
 LCS_SERVER_DB=$LCS_SERVER_ROOT/data/lcs.sqlite3
@@ -233,6 +239,12 @@ LCS_SERVER_PORT=$old_port
 LCS_RELEASES_DIR=$LCS_SERVER_ROOT/releases
 LCS_MANIFEST_FILE=$LCS_SERVER_ROOT/bootstrap-manifest.json
 LCS_TOKEN_FILE=$LCS_SERVER_TOKEN
+LCS_SECRET_KEY=$old_secret
+LCS_OIDC_DISCOVERY_URL=$old_discovery
+LCS_OIDC_CLIENT_ID=$old_client_id
+LCS_OIDC_CLIENT_SECRET=$old_client_secret
+LCS_ADMIN_USERS=$old_admins
+LCS_MAX_REQUEST_BYTES=2097152
 EOF2
    chmod 600 "$LCS_SERVER_ENV"
    chown root:root "$LCS_SERVER_ENV"
@@ -327,6 +339,7 @@ install_server() {
    cp "$SOURCE_ROOT/server/server.env.example" "$LCS_SERVER_ROOT/"
    cp -a "$SOURCE_ROOT/server/docs" "$LCS_SERVER_ROOT/"
    cp -a "$SOURCE_ROOT/server/examples" "$LCS_SERVER_ROOT/"
+   cp -a "$SOURCE_ROOT/server/web" "$LCS_SERVER_ROOT/"
 
    if [ ! -f "$LCS_SERVER_ROOT/bootstrap-manifest.json" ]; then
       cp "$SOURCE_ROOT/server/bootstrap-manifest.json" "$LCS_SERVER_ROOT/"
@@ -415,7 +428,14 @@ install_service() {
    systemctl daemon-reload
    systemctl enable lcs-service.service
 
-   echo "LCS-Systemdienst installiert und aktiviert, aber absichtlich NICHT gestartet."
+   if [ -s "$LCS_STATE_ROOT/device.json" ]; then
+      systemctl start lcs-service.service
+      echo "Vorhandener LCS-Systemdienst wurde nach dem Update gestartet."
+   else
+      echo "Frischer LCS-Systemdienst ist aktiviert, aber für das Masterimage noch nicht gestartet."
+   fi
+
+   echo "LCS-Systemdienst installiert und aktiviert."
    echo "Runtime: $LCS_SERVICE_ROOT"
    echo "Konfiguration: $LCS_CLIENT_ENV"
    echo "State: $LCS_STATE_ROOT"

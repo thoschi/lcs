@@ -131,6 +131,16 @@ def init_db():
          created_at INTEGER NOT NULL,
          PRIMARY KEY(machine_id, token_hash)
       );
+      CREATE TABLE IF NOT EXISTS enrollment_tokens (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         name TEXT NOT NULL UNIQUE,
+         token_hash TEXT NOT NULL UNIQUE,
+         token_prefix TEXT NOT NULL,
+         enabled INTEGER NOT NULL DEFAULT 1,
+         created_at INTEGER NOT NULL,
+         last_used_at INTEGER,
+         enrollment_count INTEGER NOT NULL DEFAULT 0
+      );
       ''')
       columns = {row['name'] for row in conn.execute('PRAGMA table_info(devices)').fetchall()}
       if 'stack_generation' not in columns:
@@ -157,21 +167,47 @@ def verify_password(password, stored):
       return False
 
 
-def enroll(payload, enrollment_token):
+def add_enrollment_token(name, token=None):
+   name = str(name).strip()
+   if not name:
+      raise ValueError('Token-Name fehlt')
+   token = token or secrets.token_urlsafe(32)
+   with db() as conn:
+      conn.execute('''
+         INSERT INTO enrollment_tokens(name, token_hash, token_prefix, created_at)
+         VALUES(?,?,?,?)
+      ''', (name, token_hash(token), token[:8], now_ts()))
+   return token
+
+
+def import_enrollment_token(name, token):
+   if not token:
+      return
+   with db() as conn:
+      conn.execute('''
+         INSERT OR IGNORE INTO enrollment_tokens(name, token_hash, token_prefix, created_at)
+         VALUES(?,?,?,?)
+      ''', (name, token_hash(token), token[:8], now_ts()))
+
+
+def enroll(payload, enrollment_token=''):
    machine_id = str(payload.get('machine_id', '')).strip()
    hostname = str(payload.get('hostname', '')).strip()
    supplied_token = str(payload.get('enrollment_token', ''))
    if not machine_id or not hostname:
       return 400, {'error': 'machine_id and hostname required'}
 
-   global_ok = bool(enrollment_token) and hmac.compare_digest(supplied_token, enrollment_token)
    one_time_hash = token_hash(supplied_token) if supplied_token else ''
    with db() as conn:
+      reusable = conn.execute('''
+         SELECT id FROM enrollment_tokens WHERE token_hash=? AND enabled=1
+      ''', (one_time_hash,)).fetchone()
+      legacy_ok = bool(enrollment_token) and hmac.compare_digest(supplied_token, enrollment_token)
       one_time = conn.execute('''
          SELECT 1 FROM enrollment_codes
          WHERE machine_id=? AND token_hash=? AND expires_at>=?
       ''', (machine_id, one_time_hash, now_ts())).fetchone()
-      if not global_ok and not one_time:
+      if not reusable and not legacy_ok and not one_time:
          return 403, {'error': 'invalid enrollment token'}
       existing = conn.execute('SELECT id FROM devices WHERE machine_id=?', (machine_id,)).fetchone()
       device_id = existing['id'] if existing else secrets.token_hex(8)
@@ -192,6 +228,11 @@ def enroll(payload, enrollment_token):
       ))
       if one_time:
          conn.execute('DELETE FROM enrollment_codes WHERE machine_id=? AND token_hash=?', (machine_id, one_time_hash))
+      if reusable:
+         conn.execute('''
+            UPDATE enrollment_tokens
+            SET last_used_at=?, enrollment_count=enrollment_count+1 WHERE id=?
+         ''', (now, reusable['id']))
       conn.execute('DELETE FROM enrollment_codes WHERE expires_at<?', (now_ts(),))
       log_event(conn, device_id, '', 'system', 'enroll', '', {'hostname': hostname})
    return 200, {'device_id': device_id, 'device_token': device_token}
@@ -365,6 +406,8 @@ def action_result(device_id, token, payload):
       conn.execute('UPDATE actions SET status=?, finished_at=?, lease_until=NULL, result_json=? WHERE id=?',
                    (status, now_ts(), json.dumps(result, ensure_ascii=False), action_id))
       log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
+      if row['capability_id'] == '__lcs_reset_device__' and status == 'done':
+         delete_device_data(conn, device['id'])
    return 200, {'ok': True}
 
 
