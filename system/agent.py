@@ -13,7 +13,7 @@ from common.config import load_env
 from common.http_client import request_json
 from common.platform_info import hardware_info, logged_in_users
 
-VERSION = '0.4.0'
+VERSION = '0.5.0'
 
 
 def default_paths():
@@ -26,10 +26,10 @@ def default_paths():
          'token': str(base / 'enrollment.token'),
       }
    return {
-      'env': os.environ.get('LCS_CONFIG', '/etc/lcs/client.env'),
-      'state_dir': '/var/lib/lcs',
-      'feature_root': '/opt/lcs-service/features',
-      'token': '/etc/lcs/enrollment.token',
+      'env': os.environ.get('LCS_CONFIG', str(BASE / 'client.env')),
+      'state_dir': str(BASE / 'state'),
+      'feature_root': str(BASE / 'features'),
+      'token': str(BASE / 'enrollment.token'),
    }
 
 

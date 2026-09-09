@@ -1,27 +1,31 @@
-# LCS Admin-Kurzreferenz
+# Administration – LCS v0.5
+
+CLI:
 
 ```bash
 LCSCTL="/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py"
+```
+
+Beispiele:
+
+```bash
 $LCSCTL status
-$LCSCTL groups
 $LCSCTL group-add Beth
 $LCSCTL group-add-device Beth beth-042
 $LCSCTL capability-publish /opt/lcs-server/examples/capabilities/inventory
 $LCSCTL capability-assign inventory group:Beth
 $LCSCTL action group:Beth inventory
-$LCSCTL logs
+$LCSCTL device-reset beth-042
 ```
 
-Serverdienst:
+Server-Konfiguration:
 
-```bash
-systemctl status lcs-server
-journalctl -u lcs-server
+```text
+/opt/lcs-server/server.env
 ```
 
-Client-Systemdienst:
+Enrollment-Token:
 
-```bash
-systemctl status lcs-service
-journalctl -u lcs-service
+```text
+/opt/lcs-server/.token
 ```

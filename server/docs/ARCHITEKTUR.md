@@ -1,13 +1,16 @@
-# Architektur LCS v0.4
+# Architektur – LCS v0.5
 
-LCS trennt drei Rollen:
+LCS trennt Quellcode, Server, privilegierten Systemdienst und Benutzerclient.
 
-- `server/`: Geräteverwaltung, Gruppen, Capability-Zuweisungen, Aktionen und Logging
-- `system/`: privilegierter, identischer Systemdienst auf allen Clients
-- `client/`: unprivilegierter grafischer Benutzerclient
+```text
+/opt/lcs          Git-/Quellrepository, unverändert
+/opt/lcs-server   Server-Runtime, Konfiguration, Secret, Daten
+/opt/lcs-service  System-Agent, Client-Konfiguration, State, Capability-Cache
+/opt/lcs-client   grafischer User-Client
+```
 
-Beth, Aleph oder andere Gerätegruppen werden ausschließlich serverseitig verwaltet. Ein Client kennt weder seine Gruppe noch ein festes Profil; der Server berechnet bei jedem Manifest-Abruf das effektive Capability-Set.
+Beth/Aleph oder andere Gruppen existieren ausschließlich serverseitig. Jeder Client installiert denselben Systemdienst und denselben User-Client. Der Server berechnet aus Gruppen- und Einzelzuweisungen das effektive Capability-Set.
 
-Der Systemdienst hält eine lokale Kopie des letzten gültigen Capability-Stacks. Ohne Serververbindung arbeitet er mit diesem Cache weiter. Heartbeats, Aktionsresultate und Events werden bei Bedarf lokal gepuffert und später übertragen.
+Der System-Agent synchronisiert Capabilities, führt Systemaktionen aus, hält Heartbeats und puffert Offline-Ergebnisse. Der User-Client liest denselben lokalen Capability-Stack und zeigt ausschließlich `user`-Capabilities an.
 
-Konkrete Installationspfade werden vom Installer in Environment-Dateien geschrieben. Python-Komponenten verwenden `LCS_*`-Konfigurationen statt Gerätegruppen oder Installationspfade im Programmcode.
+Das Git-Repository ist kein Runtime-State. Der Installer liest daraus Dateien, schreibt jedoch niemals hinein.

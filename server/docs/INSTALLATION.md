@@ -1,15 +1,30 @@
-# Installation LCS v0.4
+# Installation – LCS v0.5
 
-## Server
+## Quellrepository
 
-Das Paket liegt beispielsweise unter `/opt/lcs`:
+Das Repository kann dauerhaft unter `/opt/lcs` liegen und wird vom Installer nicht verändert:
 
 ```bash
 cd /opt/lcs
-sudo ./install.sh server
 ```
 
-Standardmäßig entstehen `/opt/lcs-server`, `/etc/lcs/server.env` und `/etc/lcs/server.token`. Bestehende v0.2/v0.3-Daten aus den alten LMN-Pfaden werden übernommen, sofern am neuen Ziel noch keine Datenbank vorhanden ist.
+## Server
+
+```bash
+./install.sh server
+```
+
+Standardmäßig entstehen ausschließlich LCS-Laufzeitdaten unter `/opt/lcs-server`:
+
+```text
+/opt/lcs-server/server.env
+/opt/lcs-server/.token
+/opt/lcs-server/data/
+/opt/lcs-server/releases/
+/opt/lcs-server/venv/
+```
+
+Die systemd-Unit liegt systembedingt unter `/etc/systemd/system/lcs-server.service`.
 
 Test:
 
@@ -17,50 +32,51 @@ Test:
 curl http://127.0.0.1:5000/health
 ```
 
-Erwartet wird Version `0.4`.
+## Frische Workstation / Masterimage
 
-## Masterimage / Workstation
-
-Falls `.token` nicht bereits im Paket liegt, vom Managementserver holen:
-
-```bash
-scp root@clients:/etc/lcs/server.token /opt/lcs/.token
-chmod 600 /opt/lcs/.token
-```
-
-Dann:
+Den Enrollment-Token sicher vom Server auf den Master übertragen, z. B. nach `/root/lcs-enrollment.token`, und dann:
 
 ```bash
 cd /opt/lcs
-sudo ./install.sh workstation https://clients.corvi.schule
+./install.sh workstation https://clients.corvi.schule \
+   --token-file /root/lcs-enrollment.token
 ```
 
-Der Dienst `lcs-service.service` wird enabled, aber nicht gestartet. Dadurch landet keine Geräteidentität im Masterimage.
+Installiert werden:
 
-Für den Prüfungsbetrieb kann `/etc/lcs/client.env` z. B. ergänzt werden um:
+```text
+/opt/lcs-service/
+/opt/lcs-client/
+```
+
+Der Systemdienst ist danach aktiviert, wird vom Installer aber bewusst nicht gestartet. Erst ein echter Client soll sich enrollen.
+
+Nach erfolgreichem Enrollment löscht der Agent `/opt/lcs-service/enrollment.token`.
+
+## Update eines bereits enrollten Clients
+
+```bash
+cd /opt/lcs
+./install.sh workstation https://clients.corvi.schule
+```
+
+Ein neuer Bootstrap-Token ist nicht nötig, solange `/opt/lcs-service/state/device.json` vorhanden ist.
+
+## Prüfungsproxy
+
+In `/opt/lcs-service/client.env`:
 
 ```ini
 LCS_PROXY=http://127.0.0.1:3128
 ```
 
-Prüfung vor dem Imaging:
+## Eigene Pfade
+
+Alle wesentlichen Installationspfade sind überschreibbar, z. B.:
 
 ```bash
-systemctl is-enabled lcs-service
-systemctl is-active lcs-service
-ls -l /var/lib/lcs/device.json
+LCS_SERVICE_ROOT=/opt/custom-service \
+LCS_STATE_ROOT=/opt/custom-service/state \
+./install.sh service https://clients.corvi.schule \
+   --token-file /root/lcs-enrollment.token
 ```
-
-Erwartet: `enabled`, nicht aktiv, keine `device.json`.
-
-## Andere Installationspfade
-
-Beispiel:
-
-```bash
-LCS_SERVICE_ROOT=/srv/lcs-service \
-LCS_STATE_ROOT=/srv/lcs-state \
-./install.sh service https://clients.corvi.schule
-```
-
-Der Installer schreibt diese Werte in die Konfiguration und rendert die Service-Dateien passend dazu.

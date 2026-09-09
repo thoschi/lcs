@@ -13,14 +13,14 @@ from capability_runtime import load_stack, run_capability
 from common.config import load_env
 from common.http_client import request_json
 
-VERSION = '0.4.0'
+VERSION = '0.5.0'
 
 
 def config_path():
    if os.name == 'nt':
       base = Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'LCS'
       return Path(os.environ.get('LCS_CONFIG', str(base / 'client.env')))
-   return Path(os.environ.get('LCS_CONFIG', '/etc/lcs/client.env'))
+   return Path(os.environ.get('LCS_CONFIG', '/opt/lcs-service/client.env'))
 
 
 def runtime_paths(config):
@@ -30,7 +30,7 @@ def runtime_paths(config):
       state_root = Path(config.get('LCS_STATE_ROOT', str(base / 'state')))
       feature_root = Path(config.get('LCS_FEATURE_ROOT', str(base / 'features')))
    else:
-      state_root = Path(config.get('LCS_STATE_ROOT', '/var/lib/lcs'))
+      state_root = Path(config.get('LCS_STATE_ROOT', '/opt/lcs-service/state'))
       feature_root = Path(config.get('LCS_FEATURE_ROOT', '/opt/lcs-service/features'))
       user_dir = Path.home() / '.config' / 'lcs'
    user_file = Path(config.get('LCS_USER_STATE', str(user_dir / 'user.json')))

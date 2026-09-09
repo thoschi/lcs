@@ -1,83 +1,117 @@
-# LCS v0.4
+# LCS v0.5
 
 **Linuxmuster Client/Core/Connection Services**
 
-Ein gemeinsames Paket für Managementserver, privilegierten Systemdienst und grafischen Benutzerclient. Gerätegruppen wie Beth/Aleph existieren ausschließlich auf dem Server; Clients erhalten nur ihr effektives Capability-Set.
+v0.5 trennt das Quellrepository strikt von der installierten Laufzeit.
 
-## Paketstruktur
+## Verzeichnisstruktur
+
+Das Git-/Quellrepository kann dauerhaft unverändert unter `/opt/lcs` liegen:
 
 ```text
-lcs/
+/opt/lcs/
 ├── install.sh
-├── .token.example
 ├── server/
 ├── system/
 └── client/
 ```
 
-Das Paket kann z. B. unter `/opt/lcs` liegen und von dort installiert werden.
+Der Installer schreibt **nie** in dieses Verzeichnis.
 
-## Standardziele
+Die Standard-Laufzeitziele sind:
 
-- Server: `/opt/lcs-server`
-- Systemdienst: `/opt/lcs-service`
-- User-Client: `/opt/lcs-client`
-- Konfiguration: `/etc/lcs`
-- lokaler Gerätestatus: `/var/lib/lcs`
-- Capability-Cache: `/opt/lcs-service/features`
+```text
+/opt/lcs-server/
+   server.py, core.py, lcsctl.py
+   server.env
+   .token
+   data/
+   releases/
+   venv/
 
-Diese Pfade sind Installer-Defaults und können über `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`, `LCS_CONFIG_ROOT`, `LCS_STATE_ROOT` und `LCS_FEATURE_ROOT` geändert werden. Der Python-Code liest die tatsächlich verwendeten Pfade aus der Konfiguration.
+/opt/lcs-service/
+   bootstrap.py, agent.py, ...
+   client.env
+   enrollment.token       # nur bis zum erfolgreichen Enrollment
+   state/
+   features/
+   venv/
 
-## Installation
+/opt/lcs-client/
+   user_client.py, ...
+   venv/
+```
 
-Server:
+Nur die Betriebssystemintegration liegt zwangsläufig außerhalb `/opt`:
+
+```text
+/etc/systemd/system/lcs-server.service
+/etc/systemd/system/lcs-service.service
+/etc/xdg/autostart/lcs-client.desktop
+```
+
+## Server installieren
 
 ```bash
 cd /opt/lcs
 ./install.sh server
 ```
 
-Workstation/Masterimage:
+Der Server-Enrollment-Token wird bei einer frischen Installation direkt als
+`/opt/lcs-server/.token` erzeugt. Das Repository bleibt unangetastet.
+
+Test:
+
+```bash
+curl http://127.0.0.1:5000/health
+```
+
+Erwartet:
+
+```json
+{"ok": true, "version": "0.5"}
+```
+
+## Workstation installieren
+
+Auf einem frischen Masterclient muss der Enrollment-Token explizit angegeben werden, z. B. nach sicherem Kopieren der Serverdatei:
+
+```bash
+cd /opt/lcs
+./install.sh workstation https://clients.corvi.schule \
+   --token-file /root/lcs-enrollment.token
+```
+
+Der Installer kopiert ihn nach `/opt/lcs-service/enrollment.token`. Nach erfolgreichem Enrollment löscht der Agent diese Datei selbst.
+
+Ein bereits enrollter Rechner kann ohne Token aktualisiert werden:
 
 ```bash
 cd /opt/lcs
 ./install.sh workstation https://clients.corvi.schule
 ```
 
-Alternativ einzeln:
+## Prüfungsproxy
 
-```bash
-./install.sh service https://clients.corvi.schule
-./install.sh client https://clients.corvi.schule
+In `/opt/lcs-service/client.env` kann ergänzt werden:
+
+```ini
+LCS_PROXY=http://127.0.0.1:3128
 ```
 
-Der Systemdienst wird installiert und enabled, auf einem Masterimage aber nicht gestartet.
+## Pfade überschreiben
 
-## Token
-
-Der Bootstrap-/Enrollment-Token liegt im Installationspaket separat als `.token`. Der Server kopiert ihn nach `/etc/lcs/server.token`. Der Systeminstaller kopiert ihn nach `/etc/lcs/enrollment.token`; nach erfolgreichem Enrollment löscht der Agent diese Datei.
-
-Beim Workstation-Install wird die Paketkopie `.token` standardmäßig entfernt, damit sie nicht zusätzlich im Masterimage verbleibt. Mit `LCS_KEEP_PACKAGE_TOKEN=1` kann dieses Verhalten bewusst abgeschaltet werden.
-
-## Verwaltung
+Die Pfade sind Installer-Defaults, keine im Anwendungsmodell fest verdrahtete Architektur. Beispiele:
 
 ```bash
-/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py status
+LCS_SERVICE_ROOT=/opt/mein-lcs-service \
+LCS_STATE_ROOT=/opt/mein-lcs-service/state \
+./install.sh service https://clients.corvi.schule \
+   --token-file /root/lcs-enrollment.token
 ```
 
-Beispiele:
+Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`, `LCS_STATE_ROOT`, `LCS_FEATURE_ROOT`, `LCS_SERVER_ENV`, `LCS_CLIENT_ENV`, `LCS_SERVER_TOKEN` und `LCS_ENROLLMENT_TOKEN`.
 
-```bash
-/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py group-add Beth
-/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py group-add-device Beth beth-042
-/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py capability-assign inventory group:Beth
-/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py action group:Beth inventory
-```
+## Migration von v0.4
 
-Lokale Identität nur explizit löschen:
-
-```bash
-./install.sh reset-identity
-```
-
-Normale Installationen/Updates erhalten die vorhandene Geräteidentität.
+Der Installer kann bestehende Daten aus `/etc/lcs` und `/var/lib/lcs` übernehmen. Diese alten Orte werden dabei nur gelesen; v0.5 verwendet anschließend die neuen Pfade unter `/opt`.

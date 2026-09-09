@@ -1,21 +1,25 @@
 #!/bin/bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+SOURCE_ROOT="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-}"
-SERVER_URL="${2:-}"
+shift || true
+
+SERVER_URL=""
+TOKEN_SOURCE="${LCS_TOKEN_SOURCE:-}"
 
 LCS_SERVER_ROOT="${LCS_SERVER_ROOT:-/opt/lcs-server}"
 LCS_CLIENT_ROOT="${LCS_CLIENT_ROOT:-/opt/lcs-client}"
 LCS_SERVICE_ROOT="${LCS_SERVICE_ROOT:-/opt/lcs-service}"
-LCS_CONFIG_ROOT="${LCS_CONFIG_ROOT:-/etc/lcs}"
-LCS_STATE_ROOT="${LCS_STATE_ROOT:-/var/lib/lcs}"
+LCS_STATE_ROOT="${LCS_STATE_ROOT:-$LCS_SERVICE_ROOT/state}"
 LCS_FEATURE_ROOT="${LCS_FEATURE_ROOT:-$LCS_SERVICE_ROOT/features}"
 LCS_SERVER_USER="${LCS_SERVER_USER:-lcs}"
-LCS_SERVER_ENV="${LCS_SERVER_ENV:-$LCS_CONFIG_ROOT/server.env}"
-LCS_CLIENT_ENV="${LCS_CLIENT_ENV:-$LCS_CONFIG_ROOT/client.env}"
-LCS_SERVER_TOKEN="${LCS_SERVER_TOKEN:-$LCS_CONFIG_ROOT/server.token}"
-LCS_ENROLLMENT_TOKEN="${LCS_ENROLLMENT_TOKEN:-$LCS_CONFIG_ROOT/enrollment.token}"
+LCS_SYSTEMD_ROOT="${LCS_SYSTEMD_ROOT:-/etc/systemd/system}"
+LCS_AUTOSTART_ROOT="${LCS_AUTOSTART_ROOT:-/etc/xdg/autostart}"
+LCS_SERVER_ENV="${LCS_SERVER_ENV:-$LCS_SERVER_ROOT/server.env}"
+LCS_CLIENT_ENV="${LCS_CLIENT_ENV:-$LCS_SERVICE_ROOT/client.env}"
+LCS_SERVER_TOKEN="${LCS_SERVER_TOKEN:-$LCS_SERVER_ROOT/.token}"
+LCS_ENROLLMENT_TOKEN="${LCS_ENROLLMENT_TOKEN:-$LCS_SERVICE_ROOT/enrollment.token}"
 
 if [ "$(id -u)" -ne 0 ]; then
    echo "Bitte als root ausführen." >&2
@@ -26,9 +30,9 @@ usage() {
    cat <<EOF2
 Aufruf:
   $0 server
-  $0 service https://clients.example
+  $0 service https://clients.example --token-file /pfad/zur/token-datei
   $0 client https://clients.example
-  $0 workstation https://clients.example
+  $0 workstation https://clients.example --token-file /pfad/zur/token-datei
   $0 all https://clients.example
   $0 reset-identity
 
@@ -39,8 +43,16 @@ workstation    Systemdienst + User-Client installieren/aktualisieren
 all            Server + Systemdienst + User-Client auf diesem Rechner
 reset-identity lokale Geräteidentität explizit löschen (Dienst wird gestoppt)
 
-Installationsziele können über LCS_SERVER_ROOT, LCS_CLIENT_ROOT,
-LCS_SERVICE_ROOT, LCS_CONFIG_ROOT und LCS_STATE_ROOT überschrieben werden.
+Option:
+  --token-file DATEI   Enrollment-Token für einen frischen Systemdienst
+
+Standardziele:
+  Server:       /opt/lcs-server
+  Systemdienst: /opt/lcs-service
+  User-Client:  /opt/lcs-client
+
+Das Quellverzeichnis (z. B. /opt/lcs als Git-Repository) wird niemals verändert.
+Alle Laufzeitpfade können über LCS_*_ROOT bzw. LCS_*_ENV überschrieben werden.
 EOF2
 }
 
@@ -48,6 +60,30 @@ if [ -z "$MODE" ]; then
    usage
    exit 2
 fi
+
+case "$MODE" in
+   service|system|client|workstation|all)
+      if [ $# -gt 0 ] && [[ "$1" != --* ]]; then
+         SERVER_URL="$1"
+         shift
+      fi
+      ;;
+esac
+
+while [ $# -gt 0 ]; do
+   case "$1" in
+      --token-file)
+         [ $# -ge 2 ] || { echo "--token-file benötigt eine Datei." >&2; exit 2; }
+         TOKEN_SOURCE="$2"
+         shift 2
+         ;;
+      *)
+         echo "Unbekannte Option: $1" >&2
+         usage
+         exit 2
+         ;;
+   esac
+done
 
 ensure_server_url() {
    if [ -z "$SERVER_URL" ]; then
@@ -61,42 +97,102 @@ read_env_value() {
    local file="$1"
    local key="$2"
    [ -f "$file" ] || return 0
-   sed -n "s/^${key}=//p" "$file" | tail -n1 | sed 's/^['\"'\"']\(.*\)['\"'\"']$/\1/'
+   sed -n "s/^${key}=//p" "$file" | tail -n1 | sed -e "s/^[\'\"]//" -e "s/[\'\"]$//"
 }
 
-prepare_package_token() {
-   if [ -s "$ROOT/.token" ]; then
-      chmod 600 "$ROOT/.token"
-      return
-   fi
+copy_token() {
+   local source="$1"
+   local target="$2"
+   local owner="${3:-root:root}"
+   [ -s "$source" ] || return 1
+   mkdir -p "$(dirname "$target")"
+   install -m 600 "$source" "$target"
+   chown "$owner" "$target"
+}
 
-   local legacy=""
+find_legacy_server_token() {
+   local candidate value
    for candidate in \
       /etc/lcs/server.token \
       /etc/lmn-client-server/.token \
       /opt/lmn-client-server/server.env \
-      /opt/lmn-client/server/server.env \
-      /etc/lmn-client/client.env; do
-      if [ -f "$candidate" ]; then
-         if [[ "$candidate" == *.env ]]; then
-            legacy="$(read_env_value "$candidate" LMN_ENROLLMENT_TOKEN)"
-         else
-            legacy="$(cat "$candidate" 2>/dev/null || true)"
+      /opt/lmn-client/server/server.env; do
+      [ -f "$candidate" ] || continue
+      if [[ "$candidate" == *.env ]]; then
+         value="$(read_env_value "$candidate" LMN_ENROLLMENT_TOKEN)"
+         [ -n "$value" ] || value="$(read_env_value "$candidate" LCS_ENROLLMENT_TOKEN)"
+         if [ -n "$value" ]; then
+            printf '%s\n' "$value"
+            return 0
          fi
-         [ -n "$legacy" ] && break
+      else
+         cat "$candidate"
+         return 0
       fi
    done
+   return 1
+}
 
-   if [ -n "$legacy" ]; then
-      printf '%s\n' "$legacy" > "$ROOT/.token"
-      chmod 600 "$ROOT/.token"
-      echo "Vorhandener Enrollment-Token wurde nach $ROOT/.token migriert."
+ensure_server_token() {
+   if [ -s "$LCS_SERVER_TOKEN" ]; then
+      chmod 600 "$LCS_SERVER_TOKEN"
+      chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_TOKEN"
       return
    fi
 
-   openssl rand -hex 32 > "$ROOT/.token"
-   chmod 600 "$ROOT/.token"
-   echo "Neuer Enrollment-Token wurde in $ROOT/.token erzeugt."
+   mkdir -p "$(dirname "$LCS_SERVER_TOKEN")"
+   local legacy=""
+   legacy="$(find_legacy_server_token 2>/dev/null || true)"
+   if [ -n "$legacy" ]; then
+      printf '%s\n' "$legacy" > "$LCS_SERVER_TOKEN"
+      echo "Vorhandener Enrollment-Token nach $LCS_SERVER_TOKEN migriert."
+   else
+      openssl rand -hex 32 > "$LCS_SERVER_TOKEN"
+      echo "Neuer Enrollment-Token in $LCS_SERVER_TOKEN erzeugt."
+   fi
+   chmod 600 "$LCS_SERVER_TOKEN"
+   chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_TOKEN"
+}
+
+ensure_enrollment_token() {
+   # Bereits enrollte Geräte benötigen bei einem Update keinen Bootstrap-Token.
+   if [ -s "$LCS_STATE_ROOT/device.json" ]; then
+      return
+   fi
+   if [ -s "$LCS_ENROLLMENT_TOKEN" ]; then
+      chmod 600 "$LCS_ENROLLMENT_TOKEN"
+      return
+   fi
+
+   if [ -n "$TOKEN_SOURCE" ]; then
+      if copy_token "$TOKEN_SOURCE" "$LCS_ENROLLMENT_TOKEN"; then
+         return
+      fi
+      echo "Token-Datei nicht lesbar oder leer: $TOKEN_SOURCE" >&2
+      exit 1
+   fi
+
+   # Für 'all' kann direkt der gerade installierte Server-Token verwendet werden.
+   if [ -s "$LCS_SERVER_TOKEN" ]; then
+      copy_token "$LCS_SERVER_TOKEN" "$LCS_ENROLLMENT_TOKEN"
+      return
+   fi
+
+   # Nur Migration: alte v0.4-Ablagen werden gelesen, aber niemals verändert.
+   local candidate
+   for candidate in \
+      /etc/lcs/enrollment.token \
+      "$SOURCE_ROOT/.token"; do
+      if [ -s "$candidate" ]; then
+         copy_token "$candidate" "$LCS_ENROLLMENT_TOKEN"
+         echo "Vorhandener Enrollment-Token aus $candidate übernommen."
+         return
+      fi
+   done
+
+   echo "Für einen frischen Systemdienst fehlt der Enrollment-Token." >&2
+   echo "Aufruf z. B.: $0 workstation $SERVER_URL --token-file /pfad/server.token" >&2
+   exit 1
 }
 
 render_template() {
@@ -113,9 +209,9 @@ render_template() {
 }
 
 write_server_env() {
-   mkdir -p "$LCS_CONFIG_ROOT"
-   local old_port="$(read_env_value "$LCS_SERVER_ENV" LCS_SERVER_PORT)"
-   local old_host="$(read_env_value "$LCS_SERVER_ENV" LCS_SERVER_HOST)"
+   local old_port old_host
+   old_port="$(read_env_value "$LCS_SERVER_ENV" LCS_SERVER_PORT)"
+   old_host="$(read_env_value "$LCS_SERVER_ENV" LCS_SERVER_HOST)"
    [ -z "$old_port" ] && old_port=5000
    [ -z "$old_host" ] && old_host=127.0.0.1
 
@@ -131,6 +227,7 @@ LCS_MANIFEST_FILE=$LCS_SERVER_ROOT/bootstrap-manifest.json
 LCS_TOKEN_FILE=$LCS_SERVER_TOKEN
 EOF2
    chmod 600 "$LCS_SERVER_ENV"
+   chown root:root "$LCS_SERVER_ENV"
 }
 
 migrate_server_data() {
@@ -138,6 +235,7 @@ migrate_server_data() {
 
    local db_target="$LCS_SERVER_ROOT/data/lcs.sqlite3"
    if [ ! -f "$db_target" ]; then
+      local old
       for old in \
          /opt/lmn-client/server/data/lmn-server.sqlite3 \
          /opt/lmn-client-server/data/lmn-server.sqlite3; do
@@ -150,6 +248,7 @@ migrate_server_data() {
    fi
 
    if [ ! -s "$LCS_SERVER_ROOT/bootstrap-manifest.json" ]; then
+      local old
       for old in \
          /opt/lmn-client/server/bootstrap-manifest.json \
          /opt/lmn-client-server/bootstrap-manifest.json; do
@@ -161,9 +260,9 @@ migrate_server_data() {
    fi
 
    if [ ! -d "$LCS_SERVER_ROOT/releases" ] || [ -z "$(find "$LCS_SERVER_ROOT/releases" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+      local old
       for old in /opt/lmn-client/server/releases /opt/lmn-client-server/releases; do
          if [ -d "$old" ]; then
-            mkdir -p "$LCS_SERVER_ROOT/releases"
             cp -a "$old/." "$LCS_SERVER_ROOT/releases/" 2>/dev/null || true
             break
          fi
@@ -171,30 +270,58 @@ migrate_server_data() {
    fi
 }
 
+migrate_v04_server_runtime() {
+   # v0.4 legte die Server-Konfiguration unter /etc/lcs ab.
+   if [ ! -f "$LCS_SERVER_ENV" ] && [ -f /etc/lcs/server.env ]; then
+      mkdir -p "$(dirname "$LCS_SERVER_ENV")"
+      cp /etc/lcs/server.env "$LCS_SERVER_ENV"
+      echo "Server-Konfiguration aus /etc/lcs/server.env übernommen."
+   fi
+}
+
+migrate_v04_client_runtime() {
+   # v0.4 legte Client-Konfiguration und State außerhalb /opt ab.
+   if [ ! -f "$LCS_CLIENT_ENV" ] && [ -f /etc/lcs/client.env ]; then
+      mkdir -p "$(dirname "$LCS_CLIENT_ENV")"
+      cp /etc/lcs/client.env "$LCS_CLIENT_ENV"
+      echo "Client-Konfiguration aus /etc/lcs/client.env übernommen."
+   fi
+   if [ -d /var/lib/lcs ] && [ -z "$(find "$LCS_STATE_ROOT" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+      mkdir -p "$LCS_STATE_ROOT"
+      cp -a /var/lib/lcs/. "$LCS_STATE_ROOT/"
+      echo "Client-State aus /var/lib/lcs übernommen."
+   fi
+   if [ ! -f "$LCS_ENROLLMENT_TOKEN" ] && [ -s /etc/lcs/enrollment.token ]; then
+      copy_token /etc/lcs/enrollment.token "$LCS_ENROLLMENT_TOKEN"
+      echo "Enrollment-Token aus /etc/lcs/enrollment.token übernommen."
+   fi
+}
+
 install_server() {
-   prepare_package_token
    systemctl stop lcs-server.service 2>/dev/null || true
    systemctl disable --now lmn-server.service 2>/dev/null || true
 
    id "$LCS_SERVER_USER" >/dev/null 2>&1 || \
       useradd --system --no-create-home --shell /usr/sbin/nologin "$LCS_SERVER_USER"
 
-   mkdir -p "$LCS_SERVER_ROOT" "$LCS_CONFIG_ROOT"
+   mkdir -p "$LCS_SERVER_ROOT"
    migrate_server_data
+   migrate_v04_server_runtime
 
    find "$LCS_SERVER_ROOT" -mindepth 1 -maxdepth 1 \
       ! -name data ! -name releases ! -name bootstrap-manifest.json ! -name venv \
+      ! -name server.env ! -name .token \
       -exec rm -rf {} +
-   cp "$ROOT/server/core.py" "$LCS_SERVER_ROOT/"
-   cp "$ROOT/server/server.py" "$LCS_SERVER_ROOT/"
-   cp "$ROOT/server/lcsctl.py" "$LCS_SERVER_ROOT/"
-   cp "$ROOT/server/requirements.txt" "$LCS_SERVER_ROOT/"
-   cp "$ROOT/server/server.env.example" "$LCS_SERVER_ROOT/"
-   cp -a "$ROOT/server/docs" "$LCS_SERVER_ROOT/"
-   cp -a "$ROOT/server/examples" "$LCS_SERVER_ROOT/"
+   cp "$SOURCE_ROOT/server/core.py" "$LCS_SERVER_ROOT/"
+   cp "$SOURCE_ROOT/server/server.py" "$LCS_SERVER_ROOT/"
+   cp "$SOURCE_ROOT/server/lcsctl.py" "$LCS_SERVER_ROOT/"
+   cp "$SOURCE_ROOT/server/requirements.txt" "$LCS_SERVER_ROOT/"
+   cp "$SOURCE_ROOT/server/server.env.example" "$LCS_SERVER_ROOT/"
+   cp -a "$SOURCE_ROOT/server/docs" "$LCS_SERVER_ROOT/"
+   cp -a "$SOURCE_ROOT/server/examples" "$LCS_SERVER_ROOT/"
 
    if [ ! -f "$LCS_SERVER_ROOT/bootstrap-manifest.json" ]; then
-      cp "$ROOT/server/bootstrap-manifest.json" "$LCS_SERVER_ROOT/"
+      cp "$SOURCE_ROOT/server/bootstrap-manifest.json" "$LCS_SERVER_ROOT/"
    fi
 
    if [ ! -d "$LCS_SERVER_ROOT/venv" ]; then
@@ -202,18 +329,18 @@ install_server() {
    fi
    "$LCS_SERVER_ROOT/venv/bin/pip" install -q -r "$LCS_SERVER_ROOT/requirements.txt"
 
+   ensure_server_token
    write_server_env
-   ln -sfn "$LCS_SERVER_ENV" "$LCS_SERVER_ROOT/server.env"
-   cp "$ROOT/.token" "$LCS_SERVER_TOKEN"
-   chmod 600 "$LCS_SERVER_TOKEN"
 
    chown -R root:root "$LCS_SERVER_ROOT"
    chown -R "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/data" "$LCS_SERVER_ROOT/releases"
-   chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/bootstrap-manifest.json"
+   chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/bootstrap-manifest.json" "$LCS_SERVER_TOKEN"
+   chmod 600 "$LCS_SERVER_TOKEN"
 
-   render_template "$ROOT/server/templates/lcs-server.service.in" /etc/systemd/system/lcs-server.service
-   chmod 644 /etc/systemd/system/lcs-server.service
-   rm -f /etc/systemd/system/lmn-server.service
+   mkdir -p "$LCS_SYSTEMD_ROOT"
+   render_template "$SOURCE_ROOT/server/templates/lcs-server.service.in" "$LCS_SYSTEMD_ROOT/lcs-server.service"
+   chmod 644 "$LCS_SYSTEMD_ROOT/lcs-server.service"
+   rm -f "$LCS_SYSTEMD_ROOT/lmn-server.service"
    systemctl daemon-reload
    systemctl enable --now lcs-server.service
 
@@ -224,15 +351,18 @@ install_server() {
 
 write_client_env() {
    ensure_server_url
-   mkdir -p "$LCS_CONFIG_ROOT"
+   mkdir -p "$LCS_SERVICE_ROOT"
 
-   local proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
-   local ca="$(read_env_value "$LCS_CLIENT_ENV" LCS_CA_FILE)"
+   local proxy ca
+   proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
+   ca="$(read_env_value "$LCS_CLIENT_ENV" LCS_CA_FILE)"
    if [ -z "$proxy" ]; then
-      proxy="$(read_env_value /etc/lmn-client/client.env LMN_PROXY)"
+      proxy="$(read_env_value /etc/lcs/client.env LCS_PROXY)"
+      [ -z "$proxy" ] && proxy="$(read_env_value /etc/lmn-client/client.env LMN_PROXY)"
    fi
    if [ -z "$ca" ]; then
-      ca="$(read_env_value /etc/lmn-client/client.env LMN_CA_FILE)"
+      ca="$(read_env_value /etc/lcs/client.env LCS_CA_FILE)"
+      [ -z "$ca" ] && ca="$(read_env_value /etc/lmn-client/client.env LMN_CA_FILE)"
    fi
 
    cat > "$LCS_CLIENT_ENV" <<EOF2
@@ -248,47 +378,46 @@ EOF2
    [ -n "$proxy" ] && printf 'LCS_PROXY=%s\n' "$proxy" >> "$LCS_CLIENT_ENV"
    [ -n "$ca" ] && printf 'LCS_CA_FILE=%s\n' "$ca" >> "$LCS_CLIENT_ENV"
    chmod 644 "$LCS_CLIENT_ENV"
+   chown root:root "$LCS_CLIENT_ENV"
 }
 
 install_service() {
    ensure_server_url
-   prepare_package_token
 
    systemctl stop lcs-service.service 2>/dev/null || true
    systemctl disable --now lmn-agent.service 2>/dev/null || true
 
-   mkdir -p "$LCS_SERVICE_ROOT" "$LCS_FEATURE_ROOT" "$LCS_STATE_ROOT" "$LCS_CONFIG_ROOT"
-   find "$LCS_SERVICE_ROOT" -mindepth 1 -maxdepth 1 ! -name features ! -name venv -exec rm -rf {} +
-   cp -a "$ROOT/system/." "$LCS_SERVICE_ROOT/"
+   mkdir -p "$LCS_SERVICE_ROOT" "$LCS_FEATURE_ROOT" "$LCS_STATE_ROOT"
+   migrate_v04_client_runtime
+
+   find "$LCS_SERVICE_ROOT" -mindepth 1 -maxdepth 1 \
+      ! -name features ! -name state ! -name venv ! -name client.env ! -name enrollment.token \
+      -exec rm -rf {} +
+   cp -a "$SOURCE_ROOT/system/." "$LCS_SERVICE_ROOT/"
    rm -rf "$LCS_SERVICE_ROOT/linux" "$LCS_SERVICE_ROOT/venv"
-   python3 -m venv "$LCS_SERVICE_ROOT/venv"
+   [ -d "$LCS_SERVICE_ROOT/venv" ] || python3 -m venv "$LCS_SERVICE_ROOT/venv"
 
    write_client_env
-   cp "$ROOT/.token" "$LCS_ENROLLMENT_TOKEN"
-   chmod 600 "$LCS_ENROLLMENT_TOKEN"
+   ensure_enrollment_token
 
-   render_template "$ROOT/system/linux/lcs-service.service.in" /etc/systemd/system/lcs-service.service
-   chmod 644 /etc/systemd/system/lcs-service.service
-   rm -f /etc/systemd/system/lmn-agent.service
+   mkdir -p "$LCS_SYSTEMD_ROOT"
+   render_template "$SOURCE_ROOT/system/linux/lcs-service.service.in" "$LCS_SYSTEMD_ROOT/lcs-service.service"
+   chmod 644 "$LCS_SYSTEMD_ROOT/lcs-service.service"
+   rm -f "$LCS_SYSTEMD_ROOT/lmn-agent.service"
    systemctl daemon-reload
    systemctl enable lcs-service.service
 
-   # Auf einem Masterimage bleibt nur die Kopie unter /etc/lcs erhalten.
-   # So landet der globale Bootstrap-Token nicht zusätzlich im Paketbaum des Images.
-   if [ "${LCS_KEEP_PACKAGE_TOKEN:-0}" != "1" ]; then
-      rm -f "$ROOT/.token"
-   fi
-
    echo "LCS-Systemdienst installiert und aktiviert, aber absichtlich NICHT gestartet."
    echo "Runtime: $LCS_SERVICE_ROOT"
+   echo "Konfiguration: $LCS_CLIENT_ENV"
    echo "State: $LCS_STATE_ROOT"
 }
 
 install_client() {
    ensure_server_url
-   mkdir -p "$LCS_CLIENT_ROOT" "$LCS_CONFIG_ROOT" /etc/xdg/autostart
+   mkdir -p "$LCS_CLIENT_ROOT" "$LCS_SERVICE_ROOT" "$LCS_AUTOSTART_ROOT"
    rm -rf "$LCS_CLIENT_ROOT"/*
-   cp -a "$ROOT/client/." "$LCS_CLIENT_ROOT/"
+   cp -a "$SOURCE_ROOT/client/." "$LCS_CLIENT_ROOT/"
    rm -rf "$LCS_CLIENT_ROOT/linux" "$LCS_CLIENT_ROOT/venv"
    python3 -m venv "$LCS_CLIENT_ROOT/venv"
 
@@ -297,9 +426,9 @@ install_client() {
    fi
 
    write_client_env
-   render_template "$ROOT/client/linux/lcs-client.desktop.in" /etc/xdg/autostart/lcs-client.desktop
-   chmod 644 /etc/xdg/autostart/lcs-client.desktop
-   rm -f /etc/xdg/autostart/lmn-user-client.desktop
+   render_template "$SOURCE_ROOT/client/linux/lcs-client.desktop.in" "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
+   chmod 644 "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
+   rm -f "$LCS_AUTOSTART_ROOT/lmn-user-client.desktop"
 
    echo "LCS-User-Client installiert: $LCS_CLIENT_ROOT"
 }
@@ -331,13 +460,10 @@ case "$MODE" in
       ;;
    workstation)
       install_service
-      # install_service entfernt .token standardmäßig; der Client benötigt ihn nicht.
       install_client
       ;;
    all)
       ensure_server_url
-      # Bei all muss der Paket-Token bis nach Installation des Dienstes erhalten bleiben.
-      export LCS_KEEP_PACKAGE_TOKEN=1
       install_server
       install_service
       install_client
