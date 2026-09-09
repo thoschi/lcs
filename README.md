@@ -1,8 +1,8 @@
-# LCS v0.5
+# LCS v0.6
 
 **Linuxmuster Client/Core/Connection Services**
 
-v0.5 trennt das Quellrepository strikt von der installierten Laufzeit.
+v0.6 trennt das Quellrepository strikt von der installierten Laufzeit.
 
 ## Verzeichnisstruktur
 
@@ -69,7 +69,7 @@ curl http://127.0.0.1:5000/health
 Erwartet:
 
 ```json
-{"ok": true, "version": "0.5"}
+{"ok": true, "version": "0.6"}
 ```
 
 ## Workstation installieren
@@ -114,4 +114,21 @@ Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`
 
 ## Migration von v0.4
 
-Der Installer kann bestehende Daten aus `/etc/lcs` und `/var/lib/lcs` übernehmen. Diese alten Orte werden dabei nur gelesen; v0.5 verwendet anschließend die neuen Pfade unter `/opt`.
+Der Installer kann bestehende Daten aus `/etc/lcs` und `/var/lib/lcs` übernehmen. Diese alten Orte werden dabei nur gelesen; v0.6 verwendet anschließend die neuen Pfade unter `/opt`.
+
+
+## Prüfungsimage ohne User-Client
+
+Für Images, auf denen ausschließlich der privilegierte Systemdienst benötigt wird:
+
+```bash
+cd /opt/lcs
+./install.sh workstation https://clients.example --token-file /pfad/server.token --no-userclient
+```
+
+`--no-userclient` installiert/aktualisiert den LCS-Systemdienst, entfernt vorhandene LCS-Autostart- und Menüeinträge und installiert keinen grafischen User-Client.
+
+Bei einer normalen Workstation werden dagegen zwei Desktop-Integrationen erzeugt:
+
+- `/etc/xdg/autostart/lcs-client.desktop` – automatischer Start nach Login
+- `/usr/share/applications/lcs-client.desktop` – sichtbarer manueller Starter im Anwendungsmenü

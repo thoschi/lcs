@@ -36,7 +36,7 @@ def load_manifest_for_device(device):
 
 
 class Handler(BaseHTTPRequestHandler):
-   server_version = 'LCSServer/0.5'
+   server_version = 'LCSServer/0.6'
 
    def log_message(self, fmt, *args):
       print('%s - %s' % (self.address_string(), fmt % args), flush=True)
@@ -71,7 +71,7 @@ class Handler(BaseHTTPRequestHandler):
    def do_GET(self):
       path = urlparse(self.path).path
       if path == '/health':
-         return self.send_json(200, {'ok': True, 'version': '0.5'})
+         return self.send_json(200, {'ok': True, 'version': '0.6'})
       if path == '/api/v1/bootstrap/manifest':
          device = self.device()
          if not device:

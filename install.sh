@@ -16,6 +16,8 @@ LCS_FEATURE_ROOT="${LCS_FEATURE_ROOT:-$LCS_SERVICE_ROOT/features}"
 LCS_SERVER_USER="${LCS_SERVER_USER:-lcs}"
 LCS_SYSTEMD_ROOT="${LCS_SYSTEMD_ROOT:-/etc/systemd/system}"
 LCS_AUTOSTART_ROOT="${LCS_AUTOSTART_ROOT:-/etc/xdg/autostart}"
+LCS_APPLICATIONS_ROOT="${LCS_APPLICATIONS_ROOT:-/usr/share/applications}"
+NO_USERCLIENT=0
 LCS_SERVER_ENV="${LCS_SERVER_ENV:-$LCS_SERVER_ROOT/server.env}"
 LCS_CLIENT_ENV="${LCS_CLIENT_ENV:-$LCS_SERVICE_ROOT/client.env}"
 LCS_SERVER_TOKEN="${LCS_SERVER_TOKEN:-$LCS_SERVER_ROOT/.token}"
@@ -32,7 +34,7 @@ Aufruf:
   $0 server
   $0 service https://clients.example --token-file /pfad/zur/token-datei
   $0 client https://clients.example
-  $0 workstation https://clients.example --token-file /pfad/zur/token-datei
+  $0 workstation https://clients.example --token-file /pfad/zur/token-datei [--no-userclient]
   $0 all https://clients.example
   $0 reset-identity
 
@@ -43,8 +45,10 @@ workstation    Systemdienst + User-Client installieren/aktualisieren
 all            Server + Systemdienst + User-Client auf diesem Rechner
 reset-identity lokale Geräteidentität explizit löschen (Dienst wird gestoppt)
 
-Option:
+Optionen:
   --token-file DATEI   Enrollment-Token für einen frischen Systemdienst
+  --no-userclient      bei workstation/all nur den Systemdienst installieren;
+                       keinen grafischen User-Client installieren
 
 Standardziele:
   Server:       /opt/lcs-server
@@ -76,6 +80,10 @@ while [ $# -gt 0 ]; do
          [ $# -ge 2 ] || { echo "--token-file benötigt eine Datei." >&2; exit 2; }
          TOKEN_SOURCE="$2"
          shift 2
+         ;;
+      --no-userclient)
+         NO_USERCLIENT=1
+         shift
          ;;
       *)
          echo "Unbekannte Option: $1" >&2
@@ -415,7 +423,7 @@ install_service() {
 
 install_client() {
    ensure_server_url
-   mkdir -p "$LCS_CLIENT_ROOT" "$LCS_SERVICE_ROOT" "$LCS_AUTOSTART_ROOT"
+   mkdir -p "$LCS_CLIENT_ROOT" "$LCS_SERVICE_ROOT" "$LCS_AUTOSTART_ROOT" "$LCS_APPLICATIONS_ROOT"
    rm -rf "$LCS_CLIENT_ROOT"/*
    cp -a "$SOURCE_ROOT/client/." "$LCS_CLIENT_ROOT/"
    rm -rf "$LCS_CLIENT_ROOT/linux" "$LCS_CLIENT_ROOT/venv"
@@ -426,11 +434,25 @@ install_client() {
    fi
 
    write_client_env
+
+   # Autostart nach Benutzeranmeldung.
    render_template "$SOURCE_ROOT/client/linux/lcs-client.desktop.in" "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
    chmod 644 "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
    rm -f "$LCS_AUTOSTART_ROOT/lmn-user-client.desktop"
 
+   # Sichtbarer Starter im Anwendungsmenü.
+   render_template "$SOURCE_ROOT/client/linux/lcs-client-menu.desktop.in" "$LCS_APPLICATIONS_ROOT/lcs-client.desktop"
+   chmod 644 "$LCS_APPLICATIONS_ROOT/lcs-client.desktop"
+
    echo "LCS-User-Client installiert: $LCS_CLIENT_ROOT"
+   echo "Autostart: $LCS_AUTOSTART_ROOT/lcs-client.desktop"
+   echo "Menüeintrag: $LCS_APPLICATIONS_ROOT/lcs-client.desktop"
+}
+
+remove_client_integration() {
+   rm -f "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
+   rm -f "$LCS_AUTOSTART_ROOT/lmn-user-client.desktop"
+   rm -f "$LCS_APPLICATIONS_ROOT/lcs-client.desktop"
 }
 
 reset_identity() {
@@ -460,13 +482,23 @@ case "$MODE" in
       ;;
    workstation)
       install_service
-      install_client
+      if [ "$NO_USERCLIENT" -eq 1 ]; then
+         remove_client_integration
+         echo "LCS-User-Client wurde wegen --no-userclient nicht installiert."
+      else
+         install_client
+      fi
       ;;
    all)
       ensure_server_url
       install_server
       install_service
-      install_client
+      if [ "$NO_USERCLIENT" -eq 1 ]; then
+         remove_client_integration
+         echo "LCS-User-Client wurde wegen --no-userclient nicht installiert."
+      else
+         install_client
+      fi
       ;;
    reset-identity)
       reset_identity

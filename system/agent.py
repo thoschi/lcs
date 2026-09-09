@@ -13,7 +13,7 @@ from common.config import load_env
 from common.http_client import request_json
 from common.platform_info import hardware_info, logged_in_users
 
-VERSION = '0.5.0'
+VERSION = '0.6.0'
 
 
 def default_paths():

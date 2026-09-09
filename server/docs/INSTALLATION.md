@@ -1,4 +1,4 @@
-# Installation – LCS v0.5
+# Installation – LCS v0.6
 
 ## Quellrepository
 

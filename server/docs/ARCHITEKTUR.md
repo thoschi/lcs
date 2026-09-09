@@ -1,4 +1,4 @@
-# Architektur – LCS v0.5
+# Architektur – LCS v0.6
 
 LCS trennt Quellcode, Server, privilegierten Systemdienst und Benutzerclient.
 

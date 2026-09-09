@@ -13,7 +13,7 @@ from capability_runtime import load_stack, run_capability
 from common.config import load_env
 from common.http_client import request_json
 
-VERSION = '0.5.0'
+VERSION = '0.6.0'
 
 
 def config_path():

@@ -1,4 +1,4 @@
-# Administration – LCS v0.5
+# Administration – LCS v0.6
 
 CLI:
 
