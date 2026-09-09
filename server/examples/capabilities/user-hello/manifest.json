@@ -1,0 +1,13 @@
+{
+  "id": "user-hello",
+  "version": "1.0.0",
+  "title": "Testoption",
+  "description": "Einfache Benutzeraktion zum Test des dynamischen Menüs.",
+  "scope": "user",
+  "tags": [
+    "user"
+  ],
+  "timeout": 30,
+  "triggers": [],
+  "entrypoint": "action.py"
+}

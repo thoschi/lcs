@@ -1,0 +1,19 @@
+{
+  "id": "inventory",
+  "version": "1.0.0",
+  "title": "Inventardaten erfassen",
+  "description": "Meldet Seriennummer, MAC-Adressen und installierte Pakete.",
+  "scope": "system",
+  "tags": [],
+  "timeout": 120,
+  "triggers": [
+    {
+      "type": "startup"
+    },
+    {
+      "type": "interval",
+      "seconds": 21600
+    }
+  ],
+  "entrypoint": "action.py"
+}

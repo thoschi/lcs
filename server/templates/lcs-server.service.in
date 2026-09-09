@@ -1,0 +1,18 @@
+[Unit]
+Description=LCS Management Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVER_USER@
+Group=@SERVER_USER@
+WorkingDirectory=@SERVER_ROOT@
+EnvironmentFile=@SERVER_ENV@
+Environment=LCS_SERVER_ENV=@SERVER_ENV@
+ExecStart=@SERVER_ROOT@/venv/bin/python @SERVER_ROOT@/server.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

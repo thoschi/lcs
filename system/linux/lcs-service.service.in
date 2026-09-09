@@ -1,0 +1,17 @@
+[Unit]
+Description=LCS System Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=LCS_CONFIG=@CLIENT_ENV@
+ExecStart=@SERVICE_ROOT@/venv/bin/python @SERVICE_ROOT@/bootstrap.py
+Restart=always
+RestartSec=10
+User=root
+WorkingDirectory=@SERVICE_ROOT@
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

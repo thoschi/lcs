@@ -1,0 +1,414 @@
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import sqlite3
+import time
+from pathlib import Path
+
+BASE = Path(__file__).resolve().parent
+DB_PATH = Path(os.environ.get('LCS_SERVER_DB', str(BASE / 'data/lcs.sqlite3')))
+SESSION_TTL = int(os.environ.get('LCS_SESSION_TTL', '120'))
+ACTION_LEASE = int(os.environ.get('LCS_ACTION_LEASE', '180'))
+ACTION_PREFETCH = int(os.environ.get('LCS_ACTION_PREFETCH', '86400'))
+
+
+def now_ts():
+   return int(time.time())
+
+
+def db():
+   conn = sqlite3.connect(DB_PATH)
+   conn.row_factory = sqlite3.Row
+   return conn
+
+
+def _create_devices_table(conn, table='devices'):
+   conn.execute(f'''
+      CREATE TABLE IF NOT EXISTS {table} (
+         id TEXT PRIMARY KEY,
+         token_hash TEXT NOT NULL,
+         hostname TEXT NOT NULL,
+         machine_id TEXT NOT NULL UNIQUE,
+         platform TEXT,
+         agent_version TEXT,
+         hardware_json TEXT,
+         logged_in_users_json TEXT,
+         stack_generation INTEGER NOT NULL DEFAULT 0,
+         first_seen INTEGER NOT NULL,
+         last_seen INTEGER NOT NULL
+      )
+   ''')
+
+
+def _migrate_legacy_devices(conn):
+   exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='devices'").fetchone()
+   if not exists:
+      return
+   columns = {row['name'] for row in conn.execute('PRAGMA table_info(devices)').fetchall()}
+   if 'profile' not in columns and 'model_group' not in columns:
+      return
+   conn.execute('DROP TABLE IF EXISTS devices_v03')
+   _create_devices_table(conn, 'devices_v03')
+   conn.execute('''
+      INSERT INTO devices_v03(
+         id, token_hash, hostname, machine_id, platform, agent_version,
+         hardware_json, logged_in_users_json, stack_generation, first_seen, last_seen
+      )
+      SELECT id, token_hash, hostname, machine_id, platform, agent_version,
+         hardware_json, logged_in_users_json, COALESCE(stack_generation, 0), first_seen, last_seen
+      FROM devices
+   ''')
+   conn.execute('DROP TABLE devices')
+   conn.execute('ALTER TABLE devices_v03 RENAME TO devices')
+
+
+def init_db():
+   DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+   with db() as conn:
+      conn.execute('PRAGMA foreign_keys=OFF')
+      _migrate_legacy_devices(conn)
+      _create_devices_table(conn)
+      conn.executescript('''
+      CREATE TABLE IF NOT EXISTS users (
+         username TEXT PRIMARY KEY,
+         full_name TEXT,
+         password_hash TEXT NOT NULL,
+         enabled INTEGER NOT NULL DEFAULT 1
+      );
+      CREATE TABLE IF NOT EXISTS sessions (
+         token_hash TEXT PRIMARY KEY,
+         device_id TEXT NOT NULL,
+         username TEXT NOT NULL,
+         user_client_version TEXT,
+         created_at INTEGER NOT NULL,
+         last_seen INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS actions (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         device_id TEXT NOT NULL,
+         capability_id TEXT NOT NULL,
+         parameters_json TEXT NOT NULL DEFAULT '{}',
+         run_at INTEGER NOT NULL,
+         status TEXT NOT NULL DEFAULT 'queued',
+         lease_until INTEGER,
+         created_at INTEGER NOT NULL,
+         started_at INTEGER,
+         finished_at INTEGER,
+         result_json TEXT
+      );
+      CREATE TABLE IF NOT EXISTS events (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         device_id TEXT,
+         username TEXT,
+         source TEXT NOT NULL,
+         event_type TEXT NOT NULL,
+         capability_id TEXT,
+         payload_json TEXT NOT NULL DEFAULT '{}',
+         created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS device_groups (
+         group_name TEXT NOT NULL,
+         device_id TEXT NOT NULL,
+         PRIMARY KEY(group_name, device_id)
+      );
+      CREATE TABLE IF NOT EXISTS groups (
+         name TEXT PRIMARY KEY,
+         description TEXT NOT NULL DEFAULT ''
+      );
+      CREATE TABLE IF NOT EXISTS capability_assignments (
+         capability_id TEXT NOT NULL,
+         target_type TEXT NOT NULL,
+         target_id TEXT NOT NULL,
+         enabled INTEGER NOT NULL DEFAULT 1,
+         PRIMARY KEY(capability_id, target_type, target_id)
+      );
+      CREATE TABLE IF NOT EXISTS enrollment_codes (
+         machine_id TEXT NOT NULL,
+         token_hash TEXT NOT NULL,
+         expires_at INTEGER NOT NULL,
+         created_at INTEGER NOT NULL,
+         PRIMARY KEY(machine_id, token_hash)
+      );
+      ''')
+      columns = {row['name'] for row in conn.execute('PRAGMA table_info(devices)').fetchall()}
+      if 'stack_generation' not in columns:
+         conn.execute('ALTER TABLE devices ADD COLUMN stack_generation INTEGER NOT NULL DEFAULT 0')
+
+
+def token_hash(token):
+   return hashlib.sha256(token.encode('utf-8')).hexdigest()
+
+
+def password_hash(password, salt=None):
+   salt = salt or secrets.token_bytes(16)
+   digest = hashlib.scrypt(password.encode('utf-8'), salt=salt, n=2**14, r=8, p=1, dklen=32, maxmem=128*1024*1024)
+   return 'scrypt$%s$%s' % (salt.hex(), digest.hex())
+
+
+def verify_password(password, stored):
+   try:
+      _, salt_hex, digest_hex = stored.split('$', 2)
+      expected = bytes.fromhex(digest_hex)
+      actual = hashlib.scrypt(password.encode('utf-8'), salt=bytes.fromhex(salt_hex), n=2**14, r=8, p=1, dklen=32, maxmem=128*1024*1024)
+      return hmac.compare_digest(actual, expected)
+   except Exception:
+      return False
+
+
+def enroll(payload, enrollment_token):
+   machine_id = str(payload.get('machine_id', '')).strip()
+   hostname = str(payload.get('hostname', '')).strip()
+   supplied_token = str(payload.get('enrollment_token', ''))
+   if not machine_id or not hostname:
+      return 400, {'error': 'machine_id and hostname required'}
+
+   global_ok = bool(enrollment_token) and hmac.compare_digest(supplied_token, enrollment_token)
+   one_time_hash = token_hash(supplied_token) if supplied_token else ''
+   with db() as conn:
+      one_time = conn.execute('''
+         SELECT 1 FROM enrollment_codes
+         WHERE machine_id=? AND token_hash=? AND expires_at>=?
+      ''', (machine_id, one_time_hash, now_ts())).fetchone()
+      if not global_ok and not one_time:
+         return 403, {'error': 'invalid enrollment token'}
+      existing = conn.execute('SELECT id FROM devices WHERE machine_id=?', (machine_id,)).fetchone()
+      device_id = existing['id'] if existing else secrets.token_hex(8)
+      device_token = secrets.token_urlsafe(32)
+      now = now_ts()
+      conn.execute('''
+         INSERT INTO devices(id, token_hash, hostname, machine_id, platform, agent_version, first_seen, last_seen)
+         VALUES(?,?,?,?,?,?,?,?)
+         ON CONFLICT(machine_id) DO UPDATE SET
+            token_hash=excluded.token_hash,
+            hostname=excluded.hostname,
+            platform=excluded.platform,
+            agent_version=excluded.agent_version,
+            last_seen=excluded.last_seen
+      ''', (
+         device_id, token_hash(device_token), hostname, machine_id,
+         payload.get('platform', ''), payload.get('agent_version', ''), now, now
+      ))
+      if one_time:
+         conn.execute('DELETE FROM enrollment_codes WHERE machine_id=? AND token_hash=?', (machine_id, one_time_hash))
+      conn.execute('DELETE FROM enrollment_codes WHERE expires_at<?', (now_ts(),))
+      log_event(conn, device_id, '', 'system', 'enroll', '', {'hostname': hostname})
+   return 200, {'device_id': device_id, 'device_token': device_token}
+
+
+def authenticate_device(device_id, token):
+   if not device_id or not token:
+      return None
+   with db() as conn:
+      row = conn.execute('SELECT * FROM devices WHERE id=?', (device_id,)).fetchone()
+   if not row or not hmac.compare_digest(row['token_hash'], token_hash(token)):
+      return None
+   return row
+
+
+def heartbeat(device_id, token, payload):
+   device = authenticate_device(device_id, token)
+   if not device:
+      return 401, {'error': 'unauthorized'}
+   hardware = payload.get('hardware', {})
+   hostname = str(hardware.get('hostname') or device['hostname'])
+   with db() as conn:
+      conn.execute('''
+         UPDATE devices SET last_seen=?, hostname=?, agent_version=?, hardware_json=?,
+            logged_in_users_json=?, stack_generation=? WHERE id=?
+      ''', (
+         now_ts(), hostname, payload.get('agent_version', ''),
+         json.dumps(hardware, ensure_ascii=False),
+         json.dumps(payload.get('logged_in_users', []), ensure_ascii=False),
+         int(payload.get('stack_generation', 0)), device['id']))
+   return 200, {'ok': True}
+
+
+def groups_for_device(device_id):
+   with db() as conn:
+      rows = conn.execute('SELECT group_name FROM device_groups WHERE device_id=? ORDER BY group_name', (device_id,)).fetchall()
+   return [row['group_name'] for row in rows]
+
+
+def capability_enabled_for_device(device_id, capability_id):
+   groups = groups_for_device(device_id)
+   with db() as conn:
+      direct = conn.execute('''
+         SELECT enabled FROM capability_assignments
+         WHERE capability_id=? AND target_type='device' AND target_id=?
+      ''', (capability_id, device_id)).fetchone()
+      if direct is not None:
+         return bool(direct['enabled'])
+
+      if groups:
+         placeholders = ','.join('?' for _ in groups)
+         rows = conn.execute(f'''
+            SELECT enabled FROM capability_assignments
+            WHERE capability_id=? AND target_type='group' AND target_id IN ({placeholders})
+         ''', [capability_id, *groups]).fetchall()
+         if any(not bool(row['enabled']) for row in rows):
+            return False
+         if any(bool(row['enabled']) for row in rows):
+            return True
+
+      global_row = conn.execute('''
+         SELECT enabled FROM capability_assignments
+         WHERE capability_id=? AND target_type='all' AND target_id='*'
+      ''', (capability_id,)).fetchone()
+      return bool(global_row['enabled']) if global_row is not None else False
+
+
+def user_login(payload):
+   username = str(payload.get('username', '')).strip()
+   password = str(payload.get('password', ''))
+   device_id = str(payload.get('device_id', '')).strip()
+   if not username or not password or not device_id:
+      return 400, {'error': 'missing credentials or device'}
+   with db() as conn:
+      user = conn.execute('SELECT * FROM users WHERE username=? AND enabled=1', (username,)).fetchone()
+      device = conn.execute('SELECT id FROM devices WHERE id=?', (device_id,)).fetchone()
+      if not user or not device or not verify_password(password, user['password_hash']):
+         return 401, {'error': 'invalid login'}
+      session_token = secrets.token_urlsafe(32)
+      now = now_ts()
+      conn.execute('INSERT INTO sessions(token_hash, device_id, username, user_client_version, created_at, last_seen) VALUES(?,?,?,?,?,?)',
+                   (token_hash(session_token), device_id, username, payload.get('user_client_version', ''), now, now))
+      log_event(conn, device_id, username, 'user', 'login', '', {})
+   return 200, {'session_token': session_token, 'username': username, 'full_name': user['full_name'] or ''}
+
+
+def authenticate_session(token):
+   if not token:
+      return None
+   with db() as conn:
+      row = conn.execute('SELECT * FROM sessions WHERE token_hash=?', (token_hash(token),)).fetchone()
+   return row
+
+
+def user_heartbeat(token):
+   session = authenticate_session(token)
+   if not session:
+      return 401, {'error': 'unauthorized'}
+   with db() as conn:
+      conn.execute('UPDATE sessions SET last_seen=? WHERE token_hash=?', (now_ts(), session['token_hash']))
+   return 200, {'ok': True}
+
+
+def resolve_devices(target):
+   with db() as conn:
+      if target == 'all':
+         return conn.execute('SELECT id, hostname FROM devices ORDER BY hostname').fetchall()
+      if target.startswith('group:'):
+         group_name = target.split(':', 1)[1]
+         return conn.execute('''
+            SELECT d.id, d.hostname FROM devices d
+            JOIN device_groups g ON g.device_id=d.id
+            WHERE g.group_name=? ORDER BY d.hostname
+         ''', (group_name,)).fetchall()
+      row = conn.execute('SELECT id, hostname FROM devices WHERE id=? OR hostname=?', (target, target)).fetchone()
+      return [row] if row else []
+
+
+def queue_action(device_id, capability_id, parameters=None, run_at=None):
+   now = now_ts()
+   with db() as conn:
+      device = conn.execute('SELECT id FROM devices WHERE id=? OR hostname=?', (device_id, device_id)).fetchone()
+      if not device:
+         raise ValueError('device not found: ' + device_id)
+      cursor = conn.execute('''
+         INSERT INTO actions(device_id, capability_id, parameters_json, run_at, status, created_at)
+         VALUES(?,?,?,?, 'queued', ?)
+      ''', (device['id'], capability_id, json.dumps(parameters or {}, ensure_ascii=False), int(run_at or now), now))
+      return cursor.lastrowid
+
+
+def poll_actions(device_id, token):
+   device = authenticate_device(device_id, token)
+   if not device:
+      return 401, {'error': 'unauthorized'}
+   now = now_ts()
+   horizon = now + ACTION_PREFETCH
+   lease = now + ACTION_LEASE
+   with db() as conn:
+      rows = conn.execute('''
+         SELECT * FROM actions
+         WHERE device_id=? AND run_at<=? AND (
+            status='queued' OR (status='running' AND COALESCE(lease_until,0)<?)
+         ) ORDER BY run_at, id LIMIT 50
+      ''', (device['id'], horizon, now)).fetchall()
+      result = []
+      for row in rows:
+         if row['run_at'] <= now:
+            conn.execute('UPDATE actions SET status="running", lease_until=?, started_at=COALESCE(started_at, ?) WHERE id=?',
+                         (lease, now, row['id']))
+         result.append({
+            'id': row['id'],
+            'capability_id': row['capability_id'],
+            'parameters': json.loads(row['parameters_json'] or '{}'),
+            'run_at': row['run_at'],
+         })
+   return 200, {'actions': result}
+
+
+def action_result(device_id, token, payload):
+   device = authenticate_device(device_id, token)
+   if not device:
+      return 401, {'error': 'unauthorized'}
+   action_id = int(payload.get('action_id', 0))
+   status = 'done' if payload.get('ok', True) else 'failed'
+   result = payload.get('result', {})
+   with db() as conn:
+      row = conn.execute('SELECT * FROM actions WHERE id=? AND device_id=?', (action_id, device['id'])).fetchone()
+      if not row:
+         return 404, {'error': 'action not found'}
+      conn.execute('UPDATE actions SET status=?, finished_at=?, lease_until=NULL, result_json=? WHERE id=?',
+                   (status, now_ts(), json.dumps(result, ensure_ascii=False), action_id))
+      log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
+   return 200, {'ok': True}
+
+
+def user_action_result(token, payload):
+   session = authenticate_session(token)
+   if not session:
+      return 401, {'error': 'unauthorized'}
+   with db() as conn:
+      log_event(conn, session['device_id'], session['username'], 'user', 'capability_result',
+                str(payload.get('capability_id', '')), payload.get('result', {}))
+   return 200, {'ok': True}
+
+
+def log_event(conn, device_id, username, source, event_type, capability_id, payload):
+   conn.execute('''
+      INSERT INTO events(device_id, username, source, event_type, capability_id, payload_json, created_at)
+      VALUES(?,?,?,?,?,?,?)
+   ''', (device_id or None, username or None, source, event_type, capability_id or None,
+         json.dumps(payload or {}, ensure_ascii=False), now_ts()))
+
+
+def device_event(device_id, token, payload):
+   device = authenticate_device(device_id, token)
+   if not device:
+      return 401, {'error': 'unauthorized'}
+   with db() as conn:
+      log_event(conn, device['id'], '', 'system', str(payload.get('event_type', 'event')),
+                str(payload.get('capability_id', '')), payload.get('payload', {}))
+   return 200, {'ok': True}
+
+
+def delete_device_data(conn, device_id):
+   conn.execute('DELETE FROM sessions WHERE device_id=?', (device_id,))
+   conn.execute('DELETE FROM actions WHERE device_id=?', (device_id,))
+   conn.execute('DELETE FROM events WHERE device_id=?', (device_id,))
+   conn.execute('DELETE FROM device_groups WHERE device_id=?', (device_id,))
+   conn.execute("DELETE FROM capability_assignments WHERE target_type='device' AND target_id=?", (device_id,))
+   conn.execute('DELETE FROM devices WHERE id=?', (device_id,))
+
+
+def self_delete(device_id, token):
+   device = authenticate_device(device_id, token)
+   if not device:
+      return 401, {'error': 'unauthorized'}
+   with db() as conn:
+      delete_device_data(conn, device['id'])
+   return 200, {'ok': True}
