@@ -159,7 +159,8 @@ def run_gui(config, device_id, user_file, feature_root):
             report_result(config, session['token'], cap['id'], result)
             root.after(0, lambda: messagebox.showinfo(cap.get('title', cap['id']), 'Aktion abgeschlossen.'))
          except Exception as exc:
-            root.after(0, lambda: messagebox.showerror(cap.get('title', cap['id']), str(exc)))
+            message = str(exc)
+            root.after(0, lambda message=message: messagebox.showerror(cap.get('title', cap['id']), message))
       threading.Thread(target=worker, daemon=True).start()
 
    def load_menu(force=False):

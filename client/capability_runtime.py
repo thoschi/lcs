@@ -14,6 +14,10 @@ sys.path.insert(0, str(BASE))
 
 from common.http_client import request_json
 
+MAX_PACKAGE_BYTES = 50 * 1024 * 1024
+MAX_EXTRACTED_BYTES = 200 * 1024 * 1024
+MAX_ARCHIVE_MEMBERS = 1000
+
 
 def stack_paths(feature_root):
    root = Path(feature_root)
@@ -44,7 +48,10 @@ def _write_json_atomic(path, payload):
 def _safe_extract(archive, destination):
    destination = destination.resolve()
    with zipfile.ZipFile(archive) as zf:
-      for member in zf.infolist():
+      members = zf.infolist()
+      if len(members) > MAX_ARCHIVE_MEMBERS or sum(item.file_size for item in members) > MAX_EXTRACTED_BYTES:
+         raise RuntimeError('Capability package exceeds extraction limits')
+      for member in members:
          target = (destination / member.filename).resolve()
          if destination != target and destination not in target.parents:
             raise RuntimeError('Unsafe path in capability package: ' + member.filename)
@@ -56,7 +63,15 @@ def _download(url, destination, headers=None, ca_file=None, timeout=15):
    req = urllib.request.Request(url, headers=headers or {})
    context = ssl.create_default_context(cafile=ca_file) if ca_file else ssl.create_default_context()
    with urllib.request.urlopen(req, context=context, timeout=timeout) as response, destination.open('wb') as out:
-      shutil.copyfileobj(response, out)
+      total = 0
+      while True:
+         chunk = response.read(1024 * 1024)
+         if not chunk:
+            break
+         total += len(chunk)
+         if total > MAX_PACKAGE_BYTES:
+            raise RuntimeError('Capability package exceeds download limit')
+         out.write(chunk)
 
 
 def sync_stack(config, state):

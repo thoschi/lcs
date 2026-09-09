@@ -60,6 +60,22 @@ cd /opt/lcs
 Der Server-Enrollment-Token wird bei einer frischen Installation direkt als
 `/opt/lcs-server/.token` erzeugt. Das Repository bleibt unangetastet.
 
+Nach der Installation werden Keycloak und die vorläufige Admin-Liste in
+`/opt/lcs-server/server.env` konfiguriert:
+
+```ini
+LCS_OIDC_DISCOVERY_URL=https://keycloak.example/realms/schule/.well-known/openid-configuration
+LCS_OIDC_CLIENT_ID=lcs
+LCS_OIDC_CLIENT_SECRET=client-secret
+LCS_ADMIN_USERS=administrator,admin@example.org
+```
+
+Die Redirect-URI des Keycloak-Clients lautet
+`https://clients.example/auth/callback`. Die Administration ist anschließend
+unter `https://clients.example/admin` erreichbar. Der lokale Server bleibt
+bewusst an `127.0.0.1` gebunden und benötigt für entfernte Clients einen
+TLS-terminierenden Reverse Proxy.
+
 Test:
 
 ```bash
@@ -84,12 +100,35 @@ cd /opt/lcs
 
 Der Installer kopiert ihn nach `/opt/lcs-service/enrollment.token`. Nach erfolgreichem Enrollment löscht der Agent diese Datei selbst.
 
+## Enrollment-Tokens pro Image
+
+Die Webadministration kann mehrere benannte, wiederverwendbare Tokens erzeugen.
+Der vollständige Wert wird nur einmal direkt nach dem Erzeugen angezeigt. So
+kann jedes Masterimage einen eigenen Token erhalten. Wird ein Image ausgemustert
+oder ein Token kompromittiert, lässt sich nur dieser Token widerrufen; bereits
+enrollte Clients behalten ihre Geräteidentität.
+
+Alternativ steht die lokale Server-CLI zur Verfügung:
+
+```bash
+/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py token-create "Image 2026-09"
+/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py tokens
+/opt/lcs-server/venv/bin/python /opt/lcs-server/lcsctl.py token-revoke "Image 2026-09"
+```
+
 Ein bereits enrollter Rechner kann ohne Token aktualisiert werden:
 
 ```bash
 cd /opt/lcs
 ./install.sh workstation https://clients.corvi.schule
 ```
+
+In der Clientübersicht der Webadministration kann ein Gerät generalisiert
+werden. Der Server wartet dabei auf die Bestätigung des Clients; anschließend
+werden die lokale Identität und der Capability-Cache sowie sämtliche
+zugehörigen Serverdaten entfernt. Für nicht mehr erreichbare Geräte gibt es
+zusätzlich eine ausdrücklich serverseitige Sofortlöschung. Ergebnisse und
+Fehler normaler Systemaktionen werden in der Aktionstabelle angezeigt.
 
 ## Prüfungsproxy
 

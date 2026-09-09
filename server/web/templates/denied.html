@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LCS · Kein Zugriff</title><link rel="stylesheet" href="{{ url_for('static', filename='admin.css') }}"></head>
+<body class="center"><main class="setup"><div class="brand">LCS</div><h1>Kein administrativer Zugriff</h1>
+<p><strong>{{ username }}</strong> ist nicht in <code>LCS_ADMIN_USERS</code> eingetragen.</p><a class="button" href="{{ url_for('logout') }}">Abmelden</a>
+</main></body></html>

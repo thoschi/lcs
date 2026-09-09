@@ -26,6 +26,11 @@ Standardmäßig entstehen ausschließlich LCS-Laufzeitdaten unter `/opt/lcs-serv
 
 Die systemd-Unit liegt systembedingt unter `/etc/systemd/system/lcs-server.service`.
 
+Für die Webadministration müssen anschließend die `LCS_OIDC_*`-Werte und
+`LCS_ADMIN_USERS` in `server.env` gesetzt werden. Danach wird der Dienst mit
+`systemctl restart lcs-server` neu gestartet. Für externen Zugriff bleibt ein
+TLS-Reverse-Proxy erforderlich, da LCS standardmäßig nur lokal lauscht.
+
 Test:
 
 ```bash
@@ -49,7 +54,10 @@ Installiert werden:
 /opt/lcs-client/
 ```
 
-Der Systemdienst ist danach aktiviert, wird vom Installer aber bewusst nicht gestartet. Erst ein echter Client soll sich enrollen.
+Bei einem frischen Image wird der Systemdienst aktiviert, aber bewusst nicht
+gestartet. Erst ein echter Client soll sich enrollen. Erkennt der Installer
+hingegen eine vorhandene Geräteidentität, startet er den Dienst nach dem Update
+sofort wieder.
 
 Nach erfolgreichem Enrollment löscht der Agent `/opt/lcs-service/enrollment.token`.
 

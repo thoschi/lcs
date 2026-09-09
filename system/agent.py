@@ -269,11 +269,17 @@ def execute_due_actions(config, state, stack, state_dir):
       cap_id = action['capability_id']
       ok = True
       if cap_id == '__lcs_reset_device__':
-         payload = {'action_id': action_id, 'ok': True, 'result': {'message': 'device reset requested'}}
+         payload = {'action_id': action_id, 'ok': True, 'result': {'message': 'device reset acknowledged'}}
          try:
-            post_device(config, state, '/api/v1/action/result', payload)
-         except Exception:
-            pass
+            status, _ = post_device(config, state, '/api/v1/action/result', payload)
+         except Exception as exc:
+            print('device reset acknowledgement unavailable:', exc, flush=True)
+            return
+         # 401 means that the server processed an earlier acknowledgement and
+         # already removed the device before the response reached this client.
+         if status not in (200, 401):
+            print('device reset acknowledgement rejected:', status, flush=True)
+            return
          reset_device(config, state, action.get('parameters', {}).get('reenrollment_token', ''))
          return
       cap = capabilities.get(cap_id)
@@ -310,10 +316,8 @@ def reset_device(config, state, reenrollment_token=''):
          os.chmod(token_path, 0o600)
       except Exception:
          pass
-   try:
-      post_device(config, state, '/api/v1/device/self-delete', {})
-   except Exception:
-      pass
+   else:
+      token_path.unlink(missing_ok=True)
    for filename in ('device.json', 'device-public.json', 'scheduler.json', 'pending-actions.json', 'result-outbox.json', 'event-outbox.json'):
       try:
          (Path(paths['state_dir']) / filename).unlink(missing_ok=True)
