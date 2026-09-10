@@ -465,6 +465,19 @@ def toggle_token(token_id):
    return redirect(url_for('admin') + '#tokens')
 
 
+@app.post('/admin/token/<int:token_id>/delete')
+@admin_required
+def delete_token(token_id):
+   check_csrf()
+   with core.db() as conn:
+      token = conn.execute('SELECT name FROM enrollment_tokens WHERE id=?', (token_id,)).fetchone()
+      if not token:
+         abort(404)
+      conn.execute('DELETE FROM enrollment_tokens WHERE id=?', (token_id,))
+   flash('Enrollment-Token %s gelöscht.' % token['name'], 'success')
+   return redirect(url_for('admin') + '#tokens')
+
+
 @app.post('/admin/capability/<capability_id>')
 @admin_required
 def edit_capability(capability_id):
