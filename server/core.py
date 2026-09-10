@@ -12,6 +12,7 @@ DB_PATH = Path(os.environ.get('LCS_SERVER_DB', str(BASE / 'data/lcs.sqlite3')))
 SESSION_TTL = int(os.environ.get('LCS_SESSION_TTL', '120'))
 ACTION_LEASE = int(os.environ.get('LCS_ACTION_LEASE', '180'))
 ACTION_PREFETCH = int(os.environ.get('LCS_ACTION_PREFETCH', '86400'))
+REENROLLMENT_TTL = int(os.environ.get('LCS_REENROLLMENT_TTL', str(30 * 86400)))
 
 
 def now_ts():
@@ -177,6 +178,22 @@ def add_enrollment_token(name, token=None):
          INSERT INTO enrollment_tokens(name, token_hash, token_prefix, created_at)
          VALUES(?,?,?,?)
       ''', (name, token_hash(token), token[:8], now_ts()))
+   return token
+
+
+def create_reenrollment_token(device_id):
+   token = secrets.token_urlsafe(32)
+   with db() as conn:
+      device = conn.execute('SELECT machine_id FROM devices WHERE id=?', (device_id,)).fetchone()
+      if not device:
+         raise ValueError('device not found: ' + device_id)
+      now = now_ts()
+      conn.execute('DELETE FROM enrollment_codes WHERE machine_id=? OR expires_at<?',
+                   (device['machine_id'], now))
+      conn.execute('''
+         INSERT INTO enrollment_codes(machine_id, token_hash, expires_at, created_at)
+         VALUES(?,?,?,?)
+      ''', (device['machine_id'], token_hash(token), now + REENROLLMENT_TTL, now))
    return token
 
 
