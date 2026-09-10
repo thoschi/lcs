@@ -146,6 +146,11 @@ def init_db():
       columns = {row['name'] for row in conn.execute('PRAGMA table_info(devices)').fetchall()}
       if 'stack_generation' not in columns:
          conn.execute('ALTER TABLE devices ADD COLUMN stack_generation INTEGER NOT NULL DEFAULT 0')
+      action_columns = {row['name'] for row in conn.execute('PRAGMA table_info(actions)').fetchall()}
+      if 'scope' not in action_columns:
+         conn.execute("ALTER TABLE actions ADD COLUMN scope TEXT NOT NULL DEFAULT 'system'")
+      if 'username' not in action_columns:
+         conn.execute("ALTER TABLE actions ADD COLUMN username TEXT NOT NULL DEFAULT ''")
 
 
 def token_hash(token):
@@ -368,16 +373,17 @@ def resolve_devices(target):
       return [row] if row else []
 
 
-def queue_action(device_id, capability_id, parameters=None, run_at=None):
+def queue_action(device_id, capability_id, parameters=None, run_at=None, scope='system', username=''):
    now = now_ts()
    with db() as conn:
       device = conn.execute('SELECT id FROM devices WHERE id=? OR hostname=?', (device_id, device_id)).fetchone()
       if not device:
          raise ValueError('device not found: ' + device_id)
       cursor = conn.execute('''
-         INSERT INTO actions(device_id, capability_id, parameters_json, run_at, status, created_at)
-         VALUES(?,?,?,?, 'queued', ?)
-      ''', (device['id'], capability_id, json.dumps(parameters or {}, ensure_ascii=False), int(run_at or now), now))
+         INSERT INTO actions(device_id, capability_id, parameters_json, run_at, status, created_at, scope, username)
+         VALUES(?,?,?,?, 'queued', ?,?,?)
+      ''', (device['id'], capability_id, json.dumps(parameters or {}, ensure_ascii=False),
+            int(run_at or now), now, scope, username))
       return cursor.lastrowid
 
 
@@ -391,7 +397,7 @@ def poll_actions(device_id, token):
    with db() as conn:
       rows = conn.execute('''
          SELECT * FROM actions
-         WHERE device_id=? AND run_at<=? AND (
+         WHERE device_id=? AND scope='system' AND run_at<=? AND (
             status='queued' OR (status='running' AND COALESCE(lease_until,0)<?)
          ) ORDER BY run_at, id LIMIT 50
       ''', (device['id'], horizon, now)).fetchall()
@@ -425,7 +431,27 @@ def action_result(device_id, token, payload):
       log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
       if row['capability_id'] == '__lcs_reset_device__' and status == 'done':
          delete_device_data(conn, device['id'])
+      else:
+         conn.execute('DELETE FROM actions WHERE id=?', (action_id,))
    return 200, {'ok': True}
+
+
+def poll_user_actions(token):
+   session = authenticate_session(token)
+   if not session:
+      return 401, {'error': 'unauthorized'}
+   now = now_ts()
+   with db() as conn:
+      rows = conn.execute('''
+         SELECT * FROM actions WHERE device_id=? AND scope='user' AND run_at<=? AND
+            (username='' OR username=?) AND (status='queued' OR
+            (status='running' AND COALESCE(lease_until,0)<?)) ORDER BY run_at,id LIMIT 20
+      ''', (session['device_id'], now, session['username'], now)).fetchall()
+      for row in rows:
+         conn.execute('UPDATE actions SET status="running", lease_until=?, started_at=COALESCE(started_at,?) WHERE id=?',
+                      (now + ACTION_LEASE, now, row['id']))
+   return 200, {'actions': [{'id': row['id'], 'capability_id': row['capability_id'],
+                             'parameters': json.loads(row['parameters_json'] or '{}')} for row in rows]}
 
 
 def user_action_result(token, payload):
@@ -433,8 +459,16 @@ def user_action_result(token, payload):
    if not session:
       return 401, {'error': 'unauthorized'}
    with db() as conn:
+      action_id = int(payload.get('action_id') or 0)
+      if action_id:
+         action = conn.execute("SELECT * FROM actions WHERE id=? AND device_id=? AND scope='user'",
+                               (action_id, session['device_id'])).fetchone()
+         if not action or (action['username'] and action['username'] != session['username']):
+            return 404, {'error': 'action not found'}
+         conn.execute('DELETE FROM actions WHERE id=?', (action_id,))
       log_event(conn, session['device_id'], session['username'], 'user', 'capability_result',
-                str(payload.get('capability_id', '')), payload.get('result', {}))
+                str(payload.get('capability_id', '')), {'action_id': action_id,
+                'ok': payload.get('ok', True), 'result': payload.get('result', {})})
    return 200, {'ok': True}
 
 

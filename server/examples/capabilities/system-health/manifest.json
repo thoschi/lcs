@@ -1,0 +1,11 @@
+{
+  "id": "system-health",
+  "version": "1.0.0",
+  "title": "Systemzustand prüfen",
+  "description": "Beispiel für einen regelmäßigen Systemdienst: meldet Laufzeit und freien Speicher.",
+  "scope": "system",
+  "tags": [],
+  "timeout": 30,
+  "triggers": [{"type": "interval", "seconds": 3600}],
+  "entrypoint": "action.py"
+}
