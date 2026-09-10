@@ -1,0 +1,10 @@
+{
+  "id": "wpa2-enterprise",
+  "version": "1.0.0",
+  "title": "WPA2-Enterprise-WLAN einrichten",
+  "description": "Richtet ein PEAP/MSCHAPv2-Netzwerk aus der serverseitigen Vorlage ein.",
+  "scope": "system",
+  "timeout": 60,
+  "parameter_example": {"ssid": "SCHULE", "username": "max.mustermann", "password": "geheim", "identity": "anonymous@schule.example", "ca_certificate": "/etc/ssl/certs/schule.pem"},
+  "entrypoint": "action.py"
+}

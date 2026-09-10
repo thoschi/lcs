@@ -1,0 +1,10 @@
+{
+  "id": "remote-files",
+  "version": "1.0.0",
+  "title": "Remote-Dateieditor",
+  "description": "Zeigt, löscht, überträgt oder ändert eine Datei auf dem Client.",
+  "scope": "system",
+  "timeout": 120,
+  "parameter_example": {"operation": "read", "path": "/etc/hostname", "content": "", "encoding": "text"},
+  "entrypoint": "action.py"
+}

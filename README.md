@@ -234,3 +234,31 @@ Bei einer normalen Workstation werden dagegen zwei Desktop-Integrationen erzeugt
 
 - `/etc/xdg/autostart/lcs-client.desktop` – automatischer Start nach Login
 - `/usr/share/applications/lcs-client.desktop` – sichtbarer manueller Starter im Anwendungsmenü
+
+## Erste Anmeldung und Aktionen
+
+Über **Vordefinierte Beispielaktionen installieren/aktualisieren** stellt der Server
+Aktionen zur lokalen Kontoinitialisierung, für WPA2-Enterprise und zur
+Remote-Dateibearbeitung bereit. Sie werden erst ausgeführt, nachdem sie unter
+**Capabilities & Zuordnung** einem Client, einer Gruppe oder allen Clients
+zugewiesen wurden.
+
+Ist `initialize-local-account` zugewiesen, plant der Server nach der ersten
+erfolgreichen Anmeldung im Nutzerclient automatisch eine privilegierte Aktion ein.
+Diese setzt das lokale Passwort und deaktiviert Autologin. Standardmäßig wird der
+LCS-Benutzername als lokaler Kontoname benutzt; im Image-Zugang kann mit
+`LCS_PASSWORD_USERNAME` ein abweichendes lokales Konto festgelegt werden. Nach der
+Rückmeldung entfernt der Server das Passwort aus den Aktionsparametern. Status und
+bereinigte Rückmeldung bleiben in der Aktionstabelle sichtbar.
+
+Der **Aktionseditor** veröffentlicht Python-Aktionen direkt als Capability-Paket.
+Dadurch benötigt der Basisclient für neue Abläufe kein Update: Er lädt zugewiesene
+Pakete samt Manifest und Prüfsumme beim nächsten Stack-Abgleich vom Server. Eigener
+Systemaktionscode besitzt volle Systemrechte und darf daher nur von entsprechend
+berechtigten Administratoren veröffentlicht werden.
+
+`wpa2-enterprise` erwartet `ssid`, `username` und `password`; optional sind
+`identity` und `ca_certificate`. `remote-files` unterstützt `read`, `delete`,
+`write` und `upload`. Für `write`/`upload` wird `content` als Text oder mit
+`"encoding": "base64"` als Binärinhalt übertragen. Dateiinhalte bis 1 MiB gelangen
+über den bestehenden Ergebnis-Rückkanal in die Aktionstabelle.

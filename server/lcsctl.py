@@ -359,7 +359,7 @@ def cmd_device_delete(args):
 
 
 def cmd_token_create(args):
-   settings = enrollment_settings(args.user_data, args.require_local_username)
+   settings = enrollment_settings(args.user_data, args.require_local_username, args.password_username)
    add_enrollment_token(args.name, args.hostname, args.password, settings=settings)
    print('Image-Zugang erzeugt. Der Installer ruft den Token mit Hostname und Passwort ab.')
    return 0
@@ -408,7 +408,7 @@ def main():
    p = sub.add_parser('capability-unassign'); p.add_argument('capability'); p.add_argument('target'); p.set_defaults(func=cmd_capability_unassign)
    p = sub.add_parser('device-reset'); p.add_argument('device'); p.set_defaults(func=cmd_device_reset)
    p = sub.add_parser('device-delete'); p.add_argument('device'); p.add_argument('--force', action='store_true'); p.set_defaults(func=cmd_device_delete)
-   p = sub.add_parser('token-create'); p.add_argument('name'); p.add_argument('hostname'); p.add_argument('password'); p.add_argument('--user-data', default=''); p.add_argument('--require-local-username', action='store_true'); p.set_defaults(func=cmd_token_create)
+   p = sub.add_parser('token-create'); p.add_argument('name'); p.add_argument('hostname'); p.add_argument('password'); p.add_argument('--user-data', default=''); p.add_argument('--password-username', default=''); p.add_argument('--require-local-username', action='store_true'); p.set_defaults(func=cmd_token_create)
    p = sub.add_parser('tokens'); p.set_defaults(func=cmd_tokens)
    p = sub.add_parser('token-revoke'); p.add_argument('token', help='ID oder Name'); p.set_defaults(func=cmd_token_revoke)
 

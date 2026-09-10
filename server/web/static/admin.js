@@ -1,4 +1,10 @@
 (() => {
+   const capability = document.querySelector('#action-capability');
+   const parameters = document.querySelector('#action-parameters');
+   capability?.addEventListener('change', () => {
+      const example = capability.selectedOptions[0].dataset.parameters;
+      if (example) parameters.value = JSON.stringify(JSON.parse(example), null, 2);
+   });
    const table = document.querySelector('#client-table');
    if (!table) return;
    const body = table.tBodies[0];

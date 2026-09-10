@@ -3,6 +3,8 @@ import os
 import secrets
 import time
 import tarfile
+import hashlib
+import zipfile
 from functools import wraps
 from pathlib import Path
 
@@ -73,6 +75,32 @@ def write_manifest(payload):
    tmp = MANIFEST.with_suffix('.tmp')
    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
    os.replace(tmp, MANIFEST)
+
+
+def publish_capability(source):
+   manifest_file = source / 'manifest.json'
+   cap = json.loads(manifest_file.read_text(encoding='utf-8'))
+   capability_id = str(cap.get('id', ''))
+   if not capability_id or any(char not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for char in capability_id):
+      raise ValueError('Ungültige Capability-ID')
+   if cap.get('scope') not in ('system', 'user'):
+      raise ValueError('Scope muss system oder user sein')
+   RELEASES.mkdir(parents=True, exist_ok=True)
+   filename = '%s-%s.zip' % (capability_id, cap['version'])
+   archive = RELEASES / filename
+   with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as package:
+      for path in sorted(source.rglob('*')):
+         if path.is_file() and '__pycache__' not in path.parts:
+            package.write(path, path.relative_to(source).as_posix())
+   item = {key: cap.get(key) for key in ('id', 'version', 'title', 'description', 'scope',
+           'tags', 'triggers', 'timeout', 'requires_password', 'conditions', 'on_login_credentials',
+           'parameter_example') if cap.get(key) is not None}
+   item.update(filename=filename, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
+   payload = load_manifest()
+   payload['capabilities'] = [entry for entry in payload.get('capabilities', []) if entry.get('id') != capability_id]
+   payload['capabilities'].append(item)
+   payload['capabilities'].sort(key=lambda entry: entry['id'])
+   bump_generation(payload)
 
 
 def bump_generation(payload=None):
@@ -218,13 +246,38 @@ def agent_api(endpoint):
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
       'device/self-delete': lambda: core.self_delete(device_id, bearer()),
-      'user/login': lambda: core.user_login(payload),
+      'user/login': lambda: login_and_schedule(payload),
       'user/heartbeat': lambda: core.user_heartbeat(bearer()),
       'user/action/result': lambda: core.user_action_result(bearer(), payload),
    }
    if endpoint not in routes:
       return jsonify(error='not found'), 404
    return api_result(routes[endpoint]())
+
+
+def login_and_schedule(payload):
+   status, response = core.user_login(payload)
+   if status != 200:
+      return status, response
+   device_id = str(payload.get('device_id', ''))
+   with core.db() as conn:
+      device_row = conn.execute('SELECT settings_json FROM devices WHERE id=?', (device_id,)).fetchone()
+   try:
+      settings = json.loads(device_row['settings_json'] or '{}') if device_row else {}
+   except json.JSONDecodeError:
+      settings = {}
+   for cap in load_manifest().get('capabilities', []):
+      if not cap.get('on_login_credentials') or not core.capability_enabled_for_device(device_id, cap['id']):
+         continue
+      with core.db() as conn:
+         existing = conn.execute('''SELECT 1 FROM actions WHERE device_id=? AND capability_id=?
+            AND status IN ('queued','running','done') LIMIT 1''', (device_id, cap['id'])).fetchone()
+      if not existing:
+         core.queue_action(device_id, cap['id'], {
+            'username': settings.get('LCS_PASSWORD_USERNAME') or payload.get('username', ''),
+            'password': payload.get('password', ''),
+         })
+   return status, response
 
 
 @app.get('/')
@@ -361,7 +414,8 @@ def create_token():
    check_csrf()
    try:
       settings = core.enrollment_settings(
-         request.form.get('user_data', ''), request.form.get('require_local_username') == '1')
+         request.form.get('user_data', ''), request.form.get('require_local_username') == '1',
+         request.form.get('password_username', ''))
       core.add_enrollment_token(request.form.get('name', ''), request.form.get('hostname', ''),
                                 request.form.get('password', ''), settings=settings)
    except Exception as exc:
@@ -395,6 +449,49 @@ def edit_capability(capability_id):
    cap['timeout'] = max(1, int(request.form.get('timeout', 120)))
    bump_generation(payload)
    flash('Capability aktualisiert.', 'success')
+   return redirect(url_for('admin') + '#capabilities')
+
+
+@app.post('/admin/capability-editor')
+@admin_required
+def capability_editor():
+   check_csrf()
+   try:
+      capability_id = request.form.get('id', '').strip().lower()
+      if not capability_id or any(char not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for char in capability_id):
+         raise ValueError('Ungültige Capability-ID')
+      version = request.form.get('version', '1.0.0').strip()
+      source = RELEASES / 'editor' / capability_id
+      source.mkdir(parents=True, exist_ok=True)
+      manifest = {
+         'id': capability_id, 'version': version,
+         'title': request.form.get('title', '').strip() or capability_id,
+         'description': request.form.get('description', '').strip(),
+         'scope': request.form.get('scope', 'system'),
+         'timeout': max(1, int(request.form.get('timeout', '120'))),
+         'entrypoint': 'action.py',
+         'parameter_example': json.loads(request.form.get('parameter_example', '{}')),
+      }
+      (source / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+      (source / 'action.py').write_text(request.form.get('code', ''), encoding='utf-8')
+      publish_capability(source)
+   except (ValueError, KeyError, json.JSONDecodeError) as exc:
+      flash(str(exc), 'error')
+   else:
+      flash('Aktion veröffentlicht. Sie kann nun zugeordnet und eingeplant werden.', 'success')
+   return redirect(url_for('admin') + '#editor')
+
+
+@app.post('/admin/examples/install')
+@admin_required
+def install_examples():
+   check_csrf()
+   installed = 0
+   for source in sorted((BASE / 'examples' / 'capabilities').iterdir()):
+      if source.is_dir() and (source / 'manifest.json').is_file():
+         publish_capability(source)
+         installed += 1
+   flash('%d Beispielaktionen veröffentlicht; bitte den gewünschten Clients zuordnen.' % installed, 'success')
    return redirect(url_for('admin') + '#capabilities')
 
 
