@@ -61,6 +61,24 @@ sofort wieder.
 
 Nach erfolgreichem Enrollment löscht der Agent `/opt/lcs-service/enrollment.token`.
 
+### Windows-Workstation
+
+Python 3 muss installiert sein. Danach in einer PowerShell mit
+Administratorrechten:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+cd C:\Pfad\zu\lcs
+.\install.ps1 workstation https://clients.corvi.schule `
+   --token-file C:\Pfad\lcs-enrollment.token
+```
+
+`install.ps1` bietet wie `install.sh` die Modi `server`, `service`/`system`,
+`client`, `workstation`, `all` und `reset-identity` sowie die Optionen
+`--token-file` und `--no-userclient`. Die Standardpfade sind
+`%ProgramFiles%\LCS\Server`, `%ProgramFiles%\LCS\Service`,
+`%ProgramFiles%\LCS\Client` und `%ProgramData%\LCS`.
+
 ## Update eines bereits enrollten Clients
 
 ```bash
