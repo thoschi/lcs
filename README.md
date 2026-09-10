@@ -100,6 +100,24 @@ cd /opt/lcs
 
 Der Installer kopiert ihn nach `/opt/lcs-service/enrollment.token`. Nach erfolgreichem Enrollment löscht der Agent diese Datei selbst.
 
+### Windows
+
+In einer PowerShell mit Administratorrechten stehen dieselben Modi und Optionen
+wie unter Linux zur Verfügung:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+cd C:\Pfad\zu\lcs
+.\install.ps1 workstation https://clients.corvi.schule `
+   --token-file C:\Pfad\lcs-enrollment.token
+```
+
+Standardmäßig werden der Systemdienst unter `%ProgramFiles%\LCS\Service`, der
+User-Client unter `%ProgramFiles%\LCS\Client` und Konfiguration sowie State unter
+`%ProgramData%\LCS` installiert. Der Systemdienst läuft als `LCSService`; der
+User-Client wird für alle Benutzer beim Login gestartet. Python 3 muss vorhanden
+sein, weitere benötigte Python-Pakete installiert das Skript in lokale venvs.
+
 ## Enrollment-Tokens pro Image
 
 Die Webadministration kann mehrere benannte, wiederverwendbare Tokens erzeugen.
