@@ -76,7 +76,7 @@ def save_state(state_dir, state):
 
 
 def save_server_settings(env_path, settings):
-   allowed = ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME')
+   allowed = ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME', 'LCS_PASSWORD_USERNAME')
    path = Path(env_path)
    try:
       lines = path.read_text(encoding='utf-8').splitlines()

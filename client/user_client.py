@@ -1,5 +1,4 @@
 import getpass
-import hashlib
 import json
 import os
 import sys
@@ -48,16 +47,17 @@ def prepare_user_data(data_dir):
 
 def store_path(data_root, username):
    name = ''.join(c if c.isalnum() or c in '._-' else '_' for c in username).strip('._') or 'user'
-   suffix = hashlib.sha256(username.encode('utf-8')).hexdigest()[:10]
-   return data_root / 'stores' / (name[:48] + '-' + suffix)
+   return data_root / name[:64]
 
 
 def load_store(user_file, data_root):
    try:
       selected = json.loads(user_file.read_text(encoding='utf-8')).get('store', '')
-      path = data_root / 'stores' / selected
+      path = data_root / selected
+      if not path.is_dir():
+         path = data_root / 'stores' / selected
       profile = json.loads((path / 'credentials.json').read_text(encoding='utf-8'))
-      if path.parent == data_root / 'stores' and profile.get('username') and profile.get('password'):
+      if path.parent in (data_root, data_root / 'stores') and profile.get('username') and profile.get('password'):
          return path, profile
    except Exception:
       pass

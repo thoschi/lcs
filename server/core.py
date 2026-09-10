@@ -148,6 +148,8 @@ def init_db():
          conn.execute('ALTER TABLE devices ADD COLUMN stack_generation INTEGER NOT NULL DEFAULT 0')
       if 'is_image_source' not in columns:
          conn.execute('ALTER TABLE devices ADD COLUMN is_image_source INTEGER NOT NULL DEFAULT 0')
+      if 'settings_json' not in columns:
+         conn.execute("ALTER TABLE devices ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'")
       action_columns = {row['name'] for row in conn.execute('PRAGMA table_info(actions)').fetchall()}
       if 'scope' not in action_columns:
          conn.execute("ALTER TABLE actions ADD COLUMN scope TEXT NOT NULL DEFAULT 'system'")
@@ -182,7 +184,7 @@ def verify_password(password, stored):
       return False
 
 
-def enrollment_settings(user_data='', require_local_username=False):
+def enrollment_settings(user_data='', require_local_username=False, password_username=''):
    settings = {}
    user_data = str(user_data).strip()
    if '\n' in user_data or '\r' in user_data:
@@ -190,6 +192,11 @@ def enrollment_settings(user_data='', require_local_username=False):
    if user_data:
       settings['LCS_USER_DATA'] = user_data
    settings['LCS_REQUIRE_LOCAL_USERNAME'] = 'true' if require_local_username else 'false'
+   password_username = str(password_username).strip()
+   if '\n' in password_username or '\r' in password_username:
+      raise ValueError('Systembenutzername darf keinen Zeilenumbruch enthalten')
+   if password_username:
+      settings['LCS_PASSWORD_USERNAME'] = password_username
    return settings
 
 
@@ -269,19 +276,21 @@ def enroll(payload):
       device_token = secrets.token_urlsafe(32)
       now = now_ts()
       conn.execute('''
-         INSERT INTO devices(id, token_hash, hostname, machine_id, platform, agent_version, first_seen, last_seen, is_image_source)
-         VALUES(?,?,?,?,?,?,?,?,?)
+         INSERT INTO devices(id, token_hash, hostname, machine_id, platform, agent_version, first_seen, last_seen, is_image_source, settings_json)
+         VALUES(?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(machine_id) DO UPDATE SET
             token_hash=excluded.token_hash,
             hostname=excluded.hostname,
             platform=excluded.platform,
             agent_version=excluded.agent_version,
             last_seen=excluded.last_seen,
-            is_image_source=excluded.is_image_source
+            is_image_source=excluded.is_image_source,
+            settings_json=excluded.settings_json
       ''', (
          device_id, token_hash(device_token), hostname, machine_id,
          payload.get('platform', ''), payload.get('agent_version', ''), now, now,
-         int(bool(reusable and reusable['hostname'].lower() == hostname.lower()))
+         int(bool(reusable and reusable['hostname'].lower() == hostname.lower())),
+         reusable['settings_json'] if reusable else '{}'
       ))
       if one_time:
          conn.execute('DELETE FROM enrollment_codes WHERE machine_id=? AND token_hash=?', (machine_id, one_time_hash))
@@ -471,6 +480,8 @@ def action_result(device_id, token, payload):
          return 404, {'error': 'action not found'}
       conn.execute('UPDATE actions SET status=?, finished_at=?, lease_until=NULL, result_json=? WHERE id=?',
                    (status, now_ts(), json.dumps(result, ensure_ascii=False), action_id))
+      if row['capability_id'] == 'initialize-local-account':
+         conn.execute("UPDATE actions SET parameters_json='{}' WHERE id=?", (action_id,))
       log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
       if row['capability_id'] == '__lcs_reset_device__' and status == 'done':
          delete_device_data(conn, device['id'])
