@@ -17,7 +17,6 @@ PORT = int(os.environ.get('LCS_SERVER_PORT', '5000'))
 BASE = Path(__file__).resolve().parent
 RELEASES = Path(os.environ.get('LCS_RELEASES_DIR', str(BASE / 'releases')))
 MANIFEST = Path(os.environ.get('LCS_MANIFEST_FILE', str(BASE / 'bootstrap-manifest.json')))
-TOKEN_FILE = Path(os.environ.get('LCS_TOKEN_FILE', str(BASE / '.token')))
 MAX_REQUEST_BYTES = int(os.environ.get('LCS_MAX_REQUEST_BYTES', str(2 * 1024 * 1024)))
 SOURCE_ROOT = Path(os.environ.get('LCS_SOURCE_ROOT', '/opt/lcs'))
 ADMIN_USERS = {value.strip() for value in os.environ.get('LCS_ADMIN_USERS', '').split(',') if value.strip()}
@@ -62,13 +61,6 @@ def format_json(value):
 def bearer():
    value = request.headers.get('Authorization', '')
    return value[7:] if value.startswith('Bearer ') else ''
-
-
-def legacy_enrollment_token():
-   try:
-      return TOKEN_FILE.read_text(encoding='utf-8').strip()
-   except OSError:
-      return ''
 
 
 def load_manifest():
@@ -449,9 +441,6 @@ def create_action():
 def main():
    core.init_db()
    RELEASES.mkdir(parents=True, exist_ok=True)
-   legacy = legacy_enrollment_token()
-   if legacy:
-      core.import_enrollment_token('Legacy-Token', legacy)
    app.run(host=HOST, port=PORT, threaded=True)
 
 

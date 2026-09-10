@@ -24,7 +24,6 @@ Die Standard-Laufzeitziele sind:
 /opt/lcs-server/
    server.py, core.py, lcsctl.py
    server.env
-   .token
    data/
    releases/
    venv/
@@ -56,9 +55,6 @@ Nur die Betriebssystemintegration liegt zwangsläufig außerhalb `/opt`:
 cd /opt/lcs
 ./install.sh server
 ```
-
-Der Server-Enrollment-Token wird bei einer frischen Installation direkt als
-`/opt/lcs-server/.token` erzeugt. Das Repository bleibt unangetastet.
 
 Nach der Installation werden Keycloak und die vorläufige Admin-Liste in
 `/opt/lcs-server/server.env` konfiguriert:
@@ -195,7 +191,7 @@ LCS_STATE_ROOT=/opt/mein-lcs-service/state \
    --token-file /root/lcs-enrollment.token
 ```
 
-Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`, `LCS_STATE_ROOT`, `LCS_FEATURE_ROOT`, `LCS_SERVER_ENV`, `LCS_CLIENT_ENV`, `LCS_SERVER_TOKEN` und `LCS_ENROLLMENT_TOKEN`.
+Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`, `LCS_STATE_ROOT`, `LCS_FEATURE_ROOT`, `LCS_SERVER_ENV`, `LCS_CLIENT_ENV` und `LCS_ENROLLMENT_TOKEN`.
 
 `LCS_USER_DATA` legt optional die Wurzel der Benutzerspeicher fest (Standard:
 `~/.config/lcs/data`, unter Windows `%APPDATA%\LCS\data`). Für jeden angemeldeten

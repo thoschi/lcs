@@ -48,9 +48,7 @@ Proxy muss TLS terminieren, Host und Protokoll weiterreichen und `/`, `/admin`,
 
 Image-Zugänge bestehen aus Name, Hostname und Passwort. Der Installer ruft den
 wiederverwendbaren Token darüber ab; der Klartext wird nicht gespeichert. In der
-Weboberfläche kann ein Zugang jederzeit widerrufen oder erneut aktiviert werden. Der bei
-der Erstinstallation erzeugte Token wird als `Legacy-Token` importiert und kann
-danach genauso widerrufen werden.
+Weboberfläche kann ein Zugang jederzeit widerrufen oder erneut aktiviert werden.
 
 ## Clients generalisieren und löschen
 
@@ -78,10 +76,4 @@ Server-Konfiguration:
 
 ```text
 /opt/lcs-server/server.env
-```
-
-Enrollment-Token:
-
-```text
-/opt/lcs-server/.token
 ```
