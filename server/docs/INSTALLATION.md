@@ -39,14 +39,18 @@ curl http://127.0.0.1:5000/health
 ## Frische Workstation / Masterimage
 
 Zuerst in der Webadministration einen Image-Zugang mit dem Hostnamen des
-Masterrechners und einem Passwort anlegen. Danach:
+Masterrechners, einem Passwort und den gewünschten Client-Einstellungen anlegen.
+Dazu gehören insbesondere der Benutzerdatenpfad und optional die Bindung an den
+lokalen Benutzernamen. Danach:
 
 ```bash
 cd /opt/lcs
 ./install.sh install workstation https://clients.corvi.schule
 ```
 
-Der Installer fragt das Passwort verdeckt ab und lädt den Token. Der Dienst
+Der Installer fragt ausschließlich das Passwort verdeckt ab und lädt den Token
+sowie die Einstellungen. Er trägt die Einstellungen automatisch in `client.env`
+ein. Der Dienst
 startet sofort; der Rechner erscheint als Image-Vorlage. Auf einem Klon erkennt
 der Agent den geänderten Hostnamen, verwirft die kopierte Identität und enrollt
 den Rechner separat. Nur die Image-Vorlage behält die Token-Datei.

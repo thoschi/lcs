@@ -127,6 +127,27 @@ copy_token() {
    chown "$owner" "$target"
 }
 
+apply_server_settings() {
+   local response="$1"
+   python3 - "$LCS_CLIENT_ENV" "$response" <<'PY'
+import json
+import os
+import sys
+
+path, raw = sys.argv[1:]
+settings = json.loads(raw).get('settings', {})
+allowed = ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME')
+lines = open(path, encoding='utf-8').read().splitlines() if os.path.exists(path) else []
+lines = [line for line in lines if not any(line.startswith(key + '=') for key in allowed)]
+for key in allowed:
+   value = str(settings.get(key, '')).replace('\r', '').replace('\n', '')
+   if value:
+      lines.append(key + '=' + value)
+with open(path, 'w', encoding='utf-8') as output:
+   output.write('\n'.join(lines) + '\n')
+PY
+}
+
 ensure_enrollment_token() {
    # Bereits enrollte Geräte benötigen bei einem Update keinen Bootstrap-Token.
    if [ -s "$LCS_STATE_ROOT/device.json" ]; then
@@ -158,6 +179,7 @@ ensure_enrollment_token() {
       token="$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["enrollment_token"])')"
       printf '%s\n' "$token" > "$LCS_ENROLLMENT_TOKEN"
       chmod 600 "$LCS_ENROLLMENT_TOKEN"
+      apply_server_settings "$response"
       return
    fi
 

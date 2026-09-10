@@ -158,6 +158,8 @@ def init_db():
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN hostname TEXT NOT NULL DEFAULT ''")
       if 'password_hash' not in token_columns:
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+      if 'settings_json' not in token_columns:
+         conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'")
 
 
 def token_hash(token):
@@ -180,7 +182,18 @@ def verify_password(password, stored):
       return False
 
 
-def add_enrollment_token(name, hostname='', password='', token=None):
+def enrollment_settings(user_data='', require_local_username=False):
+   settings = {}
+   user_data = str(user_data).strip()
+   if '\n' in user_data or '\r' in user_data:
+      raise ValueError('Benutzerdatenpfad darf keinen Zeilenumbruch enthalten')
+   if user_data:
+      settings['LCS_USER_DATA'] = user_data
+   settings['LCS_REQUIRE_LOCAL_USERNAME'] = 'true' if require_local_username else 'false'
+   return settings
+
+
+def add_enrollment_token(name, hostname='', password='', token=None, settings=None):
    name = str(name).strip()
    if not name:
       raise ValueError('Token-Name fehlt')
@@ -194,9 +207,11 @@ def add_enrollment_token(name, hostname='', password='', token=None):
       if conn.execute('SELECT 1 FROM enrollment_tokens WHERE hostname=?', (hostname,)).fetchone():
          raise ValueError('Für diesen Hostnamen existiert bereits ein Image-Zugang')
       conn.execute('''
-         INSERT INTO enrollment_tokens(name, token_hash, token_prefix, created_at, hostname, password_hash)
-         VALUES(?,?,?,?,?,?)
-      ''', (name, token_hash(token), token[:8], now_ts(), hostname, password_hash(password)))
+         INSERT INTO enrollment_tokens(
+            name, token_hash, token_prefix, created_at, hostname, password_hash, settings_json
+         ) VALUES(?,?,?,?,?,?,?)
+      ''', (name, token_hash(token), token[:8], now_ts(), hostname, password_hash(password),
+            json.dumps(settings or {}, ensure_ascii=False)))
    return token
 
 
@@ -208,7 +223,11 @@ def claim_enrollment_token(hostname, password):
    if not row or not verify_password(str(password), row['password_hash']):
       return 403, {'error': 'Hostname oder Passwort ist ungültig'}
    token = hashlib.sha256((row['name'] + '\0' + hostname + '\0' + str(password)).encode('utf-8')).hexdigest()
-   return 200, {'enrollment_token': token}
+   try:
+      settings = json.loads(row['settings_json'] or '{}')
+   except (json.JSONDecodeError, TypeError):
+      settings = {}
+   return 200, {'enrollment_token': token, 'settings': settings}
 
 
 def create_reenrollment_token(device_id):
@@ -237,7 +256,7 @@ def enroll(payload):
    one_time_hash = token_hash(supplied_token) if supplied_token else ''
    with db() as conn:
       reusable = conn.execute('''
-         SELECT id, hostname FROM enrollment_tokens WHERE token_hash=? AND enabled=1
+         SELECT id, hostname, settings_json FROM enrollment_tokens WHERE token_hash=? AND enabled=1
       ''', (one_time_hash,)).fetchone()
       one_time = conn.execute('''
          SELECT 1 FROM enrollment_codes
@@ -273,8 +292,15 @@ def enroll(payload):
          ''', (now, reusable['id']))
       conn.execute('DELETE FROM enrollment_codes WHERE expires_at<?', (now_ts(),))
       log_event(conn, device_id, '', 'system', 'enroll', '', {'hostname': hostname})
+   settings = {}
+   if reusable:
+      try:
+         settings = json.loads(reusable['settings_json'] or '{}')
+      except (json.JSONDecodeError, TypeError):
+         pass
    return 200, {'device_id': device_id, 'device_token': device_token,
-                'image_source': bool(reusable and reusable['hostname'].lower() == hostname.lower())}
+                'image_source': bool(reusable and reusable['hostname'].lower() == hostname.lower()),
+                'settings': settings}
 
 
 def authenticate_device(device_id, token):

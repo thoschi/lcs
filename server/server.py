@@ -360,8 +360,10 @@ def delete_group(name):
 def create_token():
    check_csrf()
    try:
+      settings = core.enrollment_settings(
+         request.form.get('user_data', ''), request.form.get('require_local_username') == '1')
       core.add_enrollment_token(request.form.get('name', ''), request.form.get('hostname', ''),
-                                request.form.get('password', ''))
+                                request.form.get('password', ''), settings=settings)
    except Exception as exc:
       flash(str(exc), 'error')
       return redirect(url_for('admin') + '#tokens')

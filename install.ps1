@@ -118,6 +118,23 @@ function Clear-Runtime([string]$Root, [string[]]$Keep) {
    Get-ChildItem -Force -LiteralPath $Root | Where-Object { $Keep -notcontains $_.Name } | Remove-Item -Recurse -Force
 }
 
+function Set-ServerSettings($Settings) {
+   $allowed = @('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME')
+   $lines = if (Test-Path $ClientEnv) { @(Get-Content -LiteralPath $ClientEnv) } else { @() }
+   $lines = @($lines | Where-Object {
+      $line = $_
+      -not ($allowed | Where-Object { $line.StartsWith($_ + '=') })
+   })
+   foreach ($key in $allowed) {
+      $property = $Settings.PSObject.Properties[$key]
+      if ($property -and $property.Value) {
+         $value = [string]$property.Value -replace "[`r`n]", ''
+         $lines += "$key=$value"
+      }
+   }
+   Write-Utf8 $ClientEnv (($lines -join "`r`n") + "`r`n")
+}
+
 function Copy-Tree([string]$Source, [string]$Target) {
    New-Item -ItemType Directory -Force -Path $Target | Out-Null
    Copy-Item -Path (Join-Path $Source '*') -Destination $Target -Recurse -Force
@@ -142,6 +159,7 @@ function Ensure-EnrollmentToken {
       $response = Invoke-RestMethod -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json' -Body $body
       Write-Utf8 $EnrollmentToken ($response.enrollment_token + "`r`n")
       Protect-File $EnrollmentToken
+      Set-ServerSettings $response.settings
       return
    }
    throw 'Für einen frischen Systemdienst fehlt der Enrollment-Token.'

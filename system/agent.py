@@ -75,6 +75,21 @@ def save_state(state_dir, state):
    save_json(Path(state_dir) / 'device-public.json', {'device_id': state.get('device_id', '')}, 0o644)
 
 
+def save_server_settings(env_path, settings):
+   allowed = ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME')
+   path = Path(env_path)
+   try:
+      lines = path.read_text(encoding='utf-8').splitlines()
+   except FileNotFoundError:
+      lines = []
+   lines = [line for line in lines if not any(line.startswith(key + '=') for key in allowed)]
+   for key in allowed:
+      value = str(settings.get(key, '')).replace('\r', '').replace('\n', '')
+      if value:
+         lines.append(key + '=' + value)
+   path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+
 def read_enrollment_token(config):
    token_path = Path(runtime_paths(config)['token'])
    try:
@@ -100,6 +115,7 @@ def enroll(config, state_dir):
       ca_file=config.get('LCS_CA_FILE') or None)
    if status != 200:
       raise RuntimeError('Enrollment failed: %s' % response)
+   save_server_settings(runtime_paths(config)['env'], response.get('settings', {}))
    state = {'device_id': response['device_id'], 'device_token': response['device_token'],
             'hostname': info['hostname'], 'image_source': bool(response.get('image_source'))}
    save_state(state_dir, state)

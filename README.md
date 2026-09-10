@@ -87,8 +87,9 @@ Erwartet:
 ## Workstation installieren
 
 Für jedes Masterimage wird in der Webadministration ein Image-Zugang aus Name,
-Hostname des Beispielrechners und Passwort angelegt. Die Erstinstallation fragt
-das Passwort verdeckt ab und holt den Enrollment-Token direkt vom Server:
+Hostname des Beispielrechners, Passwort und den benötigten Client-Einstellungen
+angelegt. Die Erstinstallation benötigt neben der Serveradresse nur das Passwort
+und holt Enrollment-Token, Benutzerdatenpfad und Benutzerbindung direkt vom Server:
 
 ```bash
 cd /opt/lcs
