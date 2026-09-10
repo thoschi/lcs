@@ -134,11 +134,13 @@ def sync_stack(config, state):
    return True, new_stack
 
 
-def run_capability(capability, parameters=None, timeout=120):
+def run_capability(capability, parameters=None, timeout=120, context=None):
    package_path = Path(capability['path'])
    runner = BASE / 'capability_runner.py'
-   command = [sys.executable, str(runner), str(package_path), json.dumps(parameters or {}, ensure_ascii=False)]
-   result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+   command = [sys.executable, str(runner), str(package_path)]
+   request = {'parameters': parameters or {}, 'context': context or {}}
+   result = subprocess.run(command, input=json.dumps(request, ensure_ascii=False), capture_output=True,
+                           text=True, timeout=timeout)
    output = result.stdout.strip()
    try:
       payload = json.loads(output) if output else {}

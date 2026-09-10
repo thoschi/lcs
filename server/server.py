@@ -193,6 +193,11 @@ def agent_poll():
    return api_result(core.poll_actions(request.headers.get('X-Device-ID', ''), bearer()))
 
 
+@app.get('/api/v1/user/poll')
+def user_poll():
+   return api_result(core.poll_user_actions(bearer()))
+
+
 @app.post('/api/v1/<path:endpoint>')
 def agent_api(endpoint):
    payload = request.get_json(silent=False) or {}
@@ -409,7 +414,11 @@ def create_action():
       if not devices:
          raise ValueError('Kein Client für dieses Ziel gefunden.')
       for target_device in devices:
-         core.queue_action(target_device['id'], request.form.get('capability', ''), parameters, int(time.time()))
+         capability_id = request.form.get('capability', '')
+         capability = next((item for item in load_manifest().get('capabilities', [])
+                            if item.get('id') == capability_id), {})
+         core.queue_action(target_device['id'], capability_id, parameters, int(time.time()),
+                           capability.get('scope', 'system'), request.form.get('username', '').strip())
    except (ValueError, json.JSONDecodeError) as exc:
       flash(str(exc), 'error')
    else:

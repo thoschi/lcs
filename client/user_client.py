@@ -34,7 +34,15 @@ def runtime_paths(config):
       feature_root = Path(config.get('LCS_FEATURE_ROOT', '/opt/lcs-service/features'))
       user_dir = Path.home() / '.config' / 'lcs'
    user_file = Path(config.get('LCS_USER_STATE', str(user_dir / 'user.json')))
-   return state_root / 'device-public.json', user_file, feature_root
+   data_dir = Path(config.get('LCS_USER_DATA', str(user_dir / 'data'))).expanduser()
+   return state_root / 'device-public.json', user_file, feature_root, data_dir
+
+
+def prepare_user_data(data_dir):
+   data_dir.mkdir(parents=True, exist_ok=True)
+   for name in ('backgrounds', 'printers', 'state'):
+      (data_dir / name).mkdir(exist_ok=True)
+   return data_dir
 
 
 def load_device(path):
@@ -70,11 +78,12 @@ def session_heartbeat(config, token):
       headers={'Authorization': 'Bearer ' + token}, ca_file=config.get('LCS_CA_FILE') or None)
 
 
-def report_result(config, token, capability_id, result):
+def report_result(config, token, capability_id, result, action_id=None):
    try:
       request_json(
          'POST', config['LCS_SERVER'].rstrip('/') + '/api/v1/user/action/result',
-         {'capability_id': capability_id, 'result': result},
+         {'capability_id': capability_id, 'action_id': action_id, 'result': result,
+          'ok': int(result.get('exit_code', 0)) == 0},
          headers={'Authorization': 'Bearer ' + token}, ca_file=config.get('LCS_CA_FILE') or None)
    except Exception:
       pass
@@ -87,6 +96,12 @@ def user_capabilities(feature_root):
       if cap.get('scope') == 'user' and ('user' in cap.get('tags', []) or not cap.get('tags')):
          caps.append(cap)
    return stack.get('generation', 0), sorted(caps, key=lambda c: c.get('title', c['id']).lower())
+
+
+def poll_user_actions(config, token):
+   return request_json('GET', config['LCS_SERVER'].rstrip('/') + '/api/v1/user/poll',
+                       headers={'Authorization': 'Bearer ' + token},
+                       ca_file=config.get('LCS_CA_FILE') or None, timeout=8)
 
 
 def run_cli(config, device_id, user_file, feature_root):
@@ -105,7 +120,7 @@ def run_cli(config, device_id, user_file, feature_root):
    return 0
 
 
-def run_gui(config, device_id, user_file, feature_root):
+def run_gui(config, device_id, user_file, feature_root, data_dir):
    import tkinter as tk
    from tkinter import messagebox
 
@@ -113,7 +128,12 @@ def run_gui(config, device_id, user_file, feature_root):
    root.title('LCS Benutzer')
    root.minsize(470, 300)
 
-   session = {'token': None, 'username': '', 'generation': None, 'running': True}
+   try:
+      scheduled = json.loads((data_dir / 'state' / 'scheduler.json').read_text(encoding='utf-8'))
+   except Exception:
+      scheduled = {}
+   session = {'token': None, 'username': '', 'generation': None, 'running': True,
+              'action_password': None, 'scheduled': scheduled, 'started': set()}
 
    login_frame = tk.Frame(root, padx=18, pady=18)
    login_frame.pack(fill='both', expand=True)
@@ -152,16 +172,67 @@ def run_gui(config, device_id, user_file, feature_root):
             pass
          time.sleep(30)
 
-   def execute_capability(cap):
+   def action_password(cap):
+      if not cap.get('requires_password'):
+         return ''
+      if session['action_password'] is not None:
+         return session['action_password']
+      from tkinter import simpledialog
+      reason = cap.get('password_reason') or ('Für „%s“ ist Ihr Passwort erforderlich.' % cap.get('title', cap['id']))
+      secret = simpledialog.askstring('Passwort erforderlich', reason, show='*', parent=root)
+      if secret is not None:
+         session['action_password'] = secret
+      return secret
+
+   def execute_capability(cap, parameters=None, action_id=None, notify=True):
+      secret = action_password(cap)
+      if cap.get('requires_password') and secret is None:
+         return
       def worker():
          try:
-            result = run_capability(cap, {}, timeout=int(cap.get('timeout', 120)))
-            report_result(config, session['token'], cap['id'], result)
-            root.after(0, lambda: messagebox.showinfo(cap.get('title', cap['id']), 'Aktion abgeschlossen.'))
+            context = {'data_path': str(data_dir), 'username': session['username'], 'password': secret or ''}
+            result = run_capability(cap, parameters or {}, timeout=int(cap.get('timeout', 120)), context=context)
+            report_result(config, session['token'], cap['id'], result, action_id)
+            if notify:
+               root.after(0, lambda: messagebox.showinfo(cap.get('title', cap['id']), 'Aktion abgeschlossen.'))
          except Exception as exc:
             message = str(exc)
-            root.after(0, lambda message=message: messagebox.showerror(cap.get('title', cap['id']), message))
+            if notify:
+               root.after(0, lambda message=message: messagebox.showerror(cap.get('title', cap['id']), message))
       threading.Thread(target=worker, daemon=True).start()
+
+   def run_automatic_and_disposable():
+      if not session['token']:
+         return
+      now = int(time.time())
+      _generation, caps = user_capabilities(feature_root)
+      by_id = {cap['id']: cap for cap in caps}
+      for cap in caps:
+         for trigger in cap.get('triggers', []):
+            kind = trigger.get('type')
+            key = cap['id'] + ':' + json.dumps(trigger, sort_keys=True)
+            previous = session['scheduled'].get(key, 0)
+            today = time.strftime('%Y-%m-%d', time.localtime(now))
+            due = ((kind == 'startup' and key not in session['started']) or
+                   (kind == 'interval' and now - int(previous or 0) >= max(1, int(trigger.get('seconds', 3600)))) or
+                   (kind == 'daily' and time.strftime('%H:%M', time.localtime(now)) >= trigger.get('at', '00:00')
+                    and previous != today))
+            if due:
+               session['started'].add(key)
+               session['scheduled'][key] = today if kind == 'daily' else now
+               scheduler_path = data_dir / 'state' / 'scheduler.json'
+               scheduler_path.write_text(json.dumps(session['scheduled'], indent=2), encoding='utf-8')
+               execute_capability(cap, trigger.get('parameters', {}), notify=False)
+      try:
+         status, response = poll_user_actions(config, session['token'])
+         if status == 200:
+            for action in response.get('actions', []):
+               cap = by_id.get(action['capability_id'])
+               if cap:
+                  execute_capability(cap, action.get('parameters', {}), action['id'], notify=False)
+      except Exception:
+         pass
+      root.after(10000, run_automatic_and_disposable)
 
    def load_menu(force=False):
       generation, caps = user_capabilities(feature_root)
@@ -221,6 +292,7 @@ def run_gui(config, device_id, user_file, feature_root):
       menu_frame.pack(fill='both', expand=True)
       load_menu(force=True)
       threading.Thread(target=heartbeat_loop, daemon=True).start()
+      root.after(0, run_automatic_and_disposable)
 
    login_button.configure(command=do_login)
    refresh_button.configure(command=lambda: load_menu(force=True))
@@ -240,7 +312,8 @@ def run_gui(config, device_id, user_file, feature_root):
 def main():
    env_path = config_path()
    config = load_env(env_path)
-   device_path, user_file, default_feature_root = runtime_paths(config)
+   device_path, user_file, default_feature_root, data_dir = runtime_paths(config)
+   prepare_user_data(data_dir)
    proxy = config.get('LCS_PROXY', '').strip()
    if proxy:
       os.environ['http_proxy'] = proxy
@@ -258,7 +331,7 @@ def main():
    if '--cli' in sys.argv:
       return run_cli(config, device_id, user_file, feature_root)
    try:
-      return run_gui(config, device_id, user_file, feature_root)
+      return run_gui(config, device_id, user_file, feature_root, data_dir)
    except Exception as exc:
       print('GUI nicht verfügbar:', exc)
       return run_cli(config, device_id, user_file, feature_root)
