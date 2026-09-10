@@ -71,6 +71,27 @@ def load_manifest():
    return json.loads(MANIFEST.read_text(encoding='utf-8'))
 
 
+def load_capability_for_editor(capability_id):
+   cap = next((item for item in load_manifest().get('capabilities', [])
+               if item.get('id') == capability_id), None)
+   if not cap:
+      raise ValueError('Aktion nicht gefunden')
+   archive = RELEASES / str(cap.get('filename', ''))
+   if not archive.is_file() or archive.parent != RELEASES:
+      raise ValueError('Aktionspaket nicht gefunden')
+   with zipfile.ZipFile(archive) as package:
+      try:
+         packaged_manifest = json.loads(package.read('manifest.json').decode('utf-8'))
+         entrypoint = str(packaged_manifest.get('entrypoint', 'action.py'))
+         code = package.read(entrypoint).decode('utf-8')
+      except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+         raise ValueError('Aktionspaket kann nicht im Editor geöffnet werden') from exc
+   packaged_manifest.update(cap)
+   packaged_manifest['parameter_example'] = packaged_manifest.get('parameter_example') or {}
+   packaged_manifest['code'] = code
+   return packaged_manifest
+
+
 def write_manifest(payload):
    tmp = MANIFEST.with_suffix('.tmp')
    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
@@ -174,11 +195,11 @@ def dashboard_data():
    return devices, groups, assignments, tokens, actions
 
 
-def render_admin(new_token=None):
+def render_admin(new_token=None, editor=None):
    devices, groups, assignments, tokens, actions = dashboard_data()
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=load_manifest(),
-                          now=core.now_ts(), new_token=new_token)
+                          now=core.now_ts(), new_token=new_token, editor=editor or {})
 
 
 @app.get('/health')
@@ -315,7 +336,15 @@ def logout():
 @app.get('/admin')
 @admin_required
 def admin():
-   return render_admin()
+   capability_id = request.args.get('edit', '').strip()
+   if not capability_id:
+      return render_admin()
+   try:
+      editor = load_capability_for_editor(capability_id)
+   except (ValueError, zipfile.BadZipFile) as exc:
+      flash(str(exc), 'error')
+      return redirect(url_for('admin') + '#capabilities')
+   return render_admin(editor=editor)
 
 
 @app.get('/admin/client-status')
@@ -463,7 +492,13 @@ def capability_editor():
       version = request.form.get('version', '1.0.0').strip()
       source = RELEASES / 'editor' / capability_id
       source.mkdir(parents=True, exist_ok=True)
-      manifest = {
+      try:
+         manifest = load_capability_for_editor(capability_id)
+      except (ValueError, zipfile.BadZipFile):
+         manifest = {}
+      for generated_key in ('code', 'filename', 'sha256'):
+         manifest.pop(generated_key, None)
+      manifest.update({
          'id': capability_id, 'version': version,
          'title': request.form.get('title', '').strip() or capability_id,
          'description': request.form.get('description', '').strip(),
@@ -471,7 +506,7 @@ def capability_editor():
          'timeout': max(1, int(request.form.get('timeout', '120'))),
          'entrypoint': 'action.py',
          'parameter_example': json.loads(request.form.get('parameter_example', '{}')),
-      }
+      })
       (source / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
       (source / 'action.py').write_text(request.form.get('code', ''), encoding='utf-8')
       publish_capability(source)
