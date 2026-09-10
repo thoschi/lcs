@@ -26,7 +26,6 @@ LCS_APPLICATIONS_ROOT="${LCS_APPLICATIONS_ROOT:-/usr/share/applications}"
 NO_USERCLIENT=0
 LCS_SERVER_ENV="${LCS_SERVER_ENV:-$LCS_SERVER_ROOT/server.env}"
 LCS_CLIENT_ENV="${LCS_CLIENT_ENV:-$LCS_SERVICE_ROOT/client.env}"
-LCS_SERVER_TOKEN="${LCS_SERVER_TOKEN:-$LCS_SERVER_ROOT/.token}"
 LCS_ENROLLMENT_TOKEN="${LCS_ENROLLMENT_TOKEN:-$LCS_SERVICE_ROOT/enrollment.token}"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -128,50 +127,6 @@ copy_token() {
    chown "$owner" "$target"
 }
 
-find_legacy_server_token() {
-   local candidate value
-   for candidate in \
-      /etc/lcs/server.token \
-      /etc/lmn-client-server/.token \
-      /opt/lmn-client-server/server.env \
-      /opt/lmn-client/server/server.env; do
-      [ -f "$candidate" ] || continue
-      if [[ "$candidate" == *.env ]]; then
-         value="$(read_env_value "$candidate" LMN_ENROLLMENT_TOKEN)"
-         [ -n "$value" ] || value="$(read_env_value "$candidate" LCS_ENROLLMENT_TOKEN)"
-         if [ -n "$value" ]; then
-            printf '%s\n' "$value"
-            return 0
-         fi
-      else
-         cat "$candidate"
-         return 0
-      fi
-   done
-   return 1
-}
-
-ensure_server_token() {
-   if [ -s "$LCS_SERVER_TOKEN" ]; then
-      chmod 600 "$LCS_SERVER_TOKEN"
-      chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_TOKEN"
-      return
-   fi
-
-   mkdir -p "$(dirname "$LCS_SERVER_TOKEN")"
-   local legacy=""
-   legacy="$(find_legacy_server_token 2>/dev/null || true)"
-   if [ -n "$legacy" ]; then
-      printf '%s\n' "$legacy" > "$LCS_SERVER_TOKEN"
-      echo "Vorhandener Enrollment-Token nach $LCS_SERVER_TOKEN migriert."
-   else
-      openssl rand -hex 32 > "$LCS_SERVER_TOKEN"
-      echo "Neuer Enrollment-Token in $LCS_SERVER_TOKEN erzeugt."
-   fi
-   chmod 600 "$LCS_SERVER_TOKEN"
-   chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_TOKEN"
-}
-
 ensure_enrollment_token() {
    # Bereits enrollte Geräte benötigen bei einem Update keinen Bootstrap-Token.
    if [ -s "$LCS_STATE_ROOT/device.json" ]; then
@@ -188,12 +143,6 @@ ensure_enrollment_token() {
       fi
       echo "Token-Datei nicht lesbar oder leer: $TOKEN_SOURCE" >&2
       exit 1
-   fi
-
-   # Für 'all' kann direkt der gerade installierte Server-Token verwendet werden.
-   if [ -s "$LCS_SERVER_TOKEN" ]; then
-      copy_token "$LCS_SERVER_TOKEN" "$LCS_ENROLLMENT_TOKEN"
-      return
    fi
 
    if [ "$OPERATION" = "install" ] && [ -n "$SERVER_URL" ]; then
@@ -265,7 +214,6 @@ LCS_SERVER_PORT=$old_port
 LCS_RELEASES_DIR=$LCS_SERVER_ROOT/releases
 LCS_SOURCE_ROOT=$SOURCE_ROOT
 LCS_MANIFEST_FILE=$LCS_SERVER_ROOT/bootstrap-manifest.json
-LCS_TOKEN_FILE=$LCS_SERVER_TOKEN
 LCS_SECRET_KEY=$old_secret
 LCS_OIDC_DISCOVERY_URL=$old_discovery
 LCS_OIDC_CLIENT_ID=$old_client_id
@@ -357,7 +305,7 @@ install_server() {
 
    find "$LCS_SERVER_ROOT" -mindepth 1 -maxdepth 1 \
       ! -name data ! -name releases ! -name bootstrap-manifest.json ! -name venv \
-      ! -name server.env ! -name .token \
+      ! -name server.env \
       -exec rm -rf {} +
    cp "$SOURCE_ROOT/server/core.py" "$LCS_SERVER_ROOT/"
    cp "$SOURCE_ROOT/server/server.py" "$LCS_SERVER_ROOT/"
@@ -377,13 +325,11 @@ install_server() {
    fi
    "$LCS_SERVER_ROOT/venv/bin/pip" install -q -r "$LCS_SERVER_ROOT/requirements.txt"
 
-   ensure_server_token
    write_server_env
 
    chown -R root:root "$LCS_SERVER_ROOT"
    chown -R "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/data" "$LCS_SERVER_ROOT/releases"
-   chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/bootstrap-manifest.json" "$LCS_SERVER_TOKEN"
-   chmod 600 "$LCS_SERVER_TOKEN"
+   chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/bootstrap-manifest.json"
 
    mkdir -p "$LCS_SYSTEMD_ROOT"
    render_template "$SOURCE_ROOT/server/templates/lcs-server.service.in" "$LCS_SYSTEMD_ROOT/lcs-server.service"
@@ -394,7 +340,6 @@ install_server() {
 
    echo "LCS-Server installiert: $LCS_SERVER_ROOT"
    echo "Konfiguration: $LCS_SERVER_ENV"
-   echo "Enrollment-Token: $LCS_SERVER_TOKEN"
 }
 
 write_client_env() {

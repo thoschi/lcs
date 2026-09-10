@@ -31,7 +31,6 @@ $StateRoot = if ($env:LCS_STATE_ROOT) { $env:LCS_STATE_ROOT } else { Join-Path $
 $FeatureRoot = if ($env:LCS_FEATURE_ROOT) { $env:LCS_FEATURE_ROOT } else { Join-Path $DataRoot 'features' }
 $ServerEnv = if ($env:LCS_SERVER_ENV) { $env:LCS_SERVER_ENV } else { Join-Path $ServerRoot 'server.env' }
 $ClientEnv = if ($env:LCS_CLIENT_ENV) { $env:LCS_CLIENT_ENV } else { Join-Path $DataRoot 'client.env' }
-$ServerToken = if ($env:LCS_SERVER_TOKEN) { $env:LCS_SERVER_TOKEN } else { Join-Path $ServerRoot '.token' }
 $EnrollmentToken = if ($env:LCS_ENROLLMENT_TOKEN) { $env:LCS_ENROLLMENT_TOKEN } else { Join-Path $DataRoot 'enrollment.token' }
 
 function Show-Usage {
@@ -136,11 +135,6 @@ function Ensure-EnrollmentToken {
       Protect-File $EnrollmentToken
       return
    }
-   if ((Test-Path $ServerToken) -and (Get-Item $ServerToken).Length -gt 0) {
-      Copy-Item -LiteralPath $ServerToken -Destination $EnrollmentToken -Force
-      Protect-File $EnrollmentToken
-      return
-   }
    if (($Operation -eq 'install') -and $ServerUrl) {
       $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
       $password = $credential.GetNetworkCredential().Password
@@ -235,7 +229,7 @@ function New-RandomHex([int]$Bytes = 32) {
 function Install-Server {
    & sc.exe stop LCSServer 2>$null | Out-Null
    New-Item -ItemType Directory -Force -Path $ServerRoot | Out-Null
-   Clear-Runtime $ServerRoot @('data', 'releases', 'bootstrap-manifest.json', 'venv', 'server.env', '.token')
+   Clear-Runtime $ServerRoot @('data', 'releases', 'bootstrap-manifest.json', 'venv', 'server.env')
    foreach ($name in @('core.py', 'server.py', 'lcsctl.py', 'requirements.txt', 'server.env.example')) {
       Copy-Item -LiteralPath (Join-Path $SourceRoot "server\$name") -Destination $ServerRoot -Force
    }
@@ -250,8 +244,6 @@ function Install-Server {
    $python = New-Venv $ServerRoot
    & $python -m pip install --quiet -r (Join-Path $ServerRoot 'requirements.txt') pywin32
    if ($LASTEXITCODE) { throw 'Server-Abhängigkeiten konnten nicht installiert werden.' }
-   if (-not (Test-Path $ServerToken)) { Write-Utf8 $ServerToken ((New-RandomHex) + "`r`n") }
-   Protect-File $ServerToken
    $secret = Read-EnvValue $ServerEnv 'LCS_SECRET_KEY'
    if (-not $secret) { $secret = New-RandomHex }
    $values = @{
@@ -263,7 +255,7 @@ function Install-Server {
       "LCS_SERVER_DB=$(Join-Path $ServerRoot 'data\lcs.sqlite3')", 'LCS_SESSION_TTL=120', 'LCS_ACTION_LEASE=180',
       'LCS_ACTION_PREFETCH=86400', "LCS_SERVER_HOST=$($values.LCS_SERVER_HOST)", "LCS_SERVER_PORT=$($values.LCS_SERVER_PORT)",
       "LCS_RELEASES_DIR=$(Join-Path $ServerRoot 'releases')", "LCS_SOURCE_ROOT=$SourceRoot", "LCS_MANIFEST_FILE=$(Join-Path $ServerRoot 'bootstrap-manifest.json')",
-      "LCS_TOKEN_FILE=$ServerToken", "LCS_SECRET_KEY=$secret", "LCS_OIDC_DISCOVERY_URL=$($values.LCS_OIDC_DISCOVERY_URL)",
+      "LCS_SECRET_KEY=$secret", "LCS_OIDC_DISCOVERY_URL=$($values.LCS_OIDC_DISCOVERY_URL)",
       "LCS_OIDC_CLIENT_ID=$($values.LCS_OIDC_CLIENT_ID)", "LCS_OIDC_CLIENT_SECRET=$($values.LCS_OIDC_CLIENT_SECRET)",
       "LCS_ADMIN_USERS=$($values.LCS_ADMIN_USERS)", 'LCS_MAX_REQUEST_BYTES=2097152'
    )
@@ -276,7 +268,6 @@ function Install-Server {
    & $python $serverScript start
    Write-Host "LCS-Server installiert: $ServerRoot"
    Write-Host "Konfiguration: $ServerEnv"
-   Write-Host "Enrollment-Token: $ServerToken"
 }
 
 function Reset-Identity {

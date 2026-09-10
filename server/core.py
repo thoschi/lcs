@@ -227,17 +227,7 @@ def create_reenrollment_token(device_id):
    return token
 
 
-def import_enrollment_token(name, token):
-   if not token:
-      return
-   with db() as conn:
-      conn.execute('''
-         INSERT OR IGNORE INTO enrollment_tokens(name, token_hash, token_prefix, created_at)
-         VALUES(?,?,?,?)
-      ''', (name, token_hash(token), token[:8], now_ts()))
-
-
-def enroll(payload, enrollment_token=''):
+def enroll(payload):
    machine_id = str(payload.get('machine_id', '')).strip()
    hostname = str(payload.get('hostname', '')).strip()
    supplied_token = str(payload.get('enrollment_token', ''))
@@ -249,12 +239,11 @@ def enroll(payload, enrollment_token=''):
       reusable = conn.execute('''
          SELECT id, hostname FROM enrollment_tokens WHERE token_hash=? AND enabled=1
       ''', (one_time_hash,)).fetchone()
-      legacy_ok = bool(enrollment_token) and hmac.compare_digest(supplied_token, enrollment_token)
       one_time = conn.execute('''
          SELECT 1 FROM enrollment_codes
          WHERE machine_id=? AND token_hash=? AND expires_at>=?
       ''', (machine_id, one_time_hash, now_ts())).fetchone()
-      if not reusable and not legacy_ok and not one_time:
+      if not reusable and not one_time:
          return 403, {'error': 'invalid enrollment token'}
       existing = conn.execute('SELECT id FROM devices WHERE machine_id=?', (machine_id,)).fetchone()
       device_id = existing['id'] if existing else secrets.token_hex(8)

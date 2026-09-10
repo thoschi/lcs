@@ -18,7 +18,6 @@ Standardmäßig entstehen ausschließlich LCS-Laufzeitdaten unter `/opt/lcs-serv
 
 ```text
 /opt/lcs-server/server.env
-/opt/lcs-server/.token
 /opt/lcs-server/data/
 /opt/lcs-server/releases/
 /opt/lcs-server/venv/
