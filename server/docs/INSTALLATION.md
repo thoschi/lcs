@@ -61,6 +61,34 @@ sofort wieder.
 
 Nach erfolgreichem Enrollment löscht der Agent `/opt/lcs-service/enrollment.token`.
 
+## Client bleibt in der Verwaltung offline
+
+Die Registrierung allein belegt nur ein erfolgreiches Enrollment. Als online gilt
+ein Client erst, wenn sein Systemdienst innerhalb der letzten 60 Sekunden einen
+Heartbeat gesendet hat. Bei einem frischen Linux-Image ist der Dienst absichtlich
+nur aktiviert und läuft erst nach dem nächsten Start. Für einen Test ohne Neustart:
+
+```bash
+systemctl start lcs-service.service
+systemctl status lcs-service.service
+journalctl -u lcs-service.service -n 50 --no-pager
+```
+
+Unter Windows müssen Status und letzte Meldungen des Dienstes entsprechend in
+einer administrativen PowerShell geprüft werden:
+
+```powershell
+Get-Service LCSService
+Get-Content "$env:ProgramData\LCS\service.log" -Tail 50
+```
+
+Der Windows-Dienst schreibt seine Agent-Ausgaben in diese Logdatei. Im
+Windows-Ereignisprotokoll stehen dagegen nur Start und unerwartetes Dienstende.
+
+Wiederholte Meldungen `heartbeat unavailable` sprechen für URL-, TLS-, Proxy- oder
+Netzwerkprobleme. `heartbeat failed` mit HTTP 401 weist dagegen auf eine nicht mehr
+gültige lokale Geräteidentität hin.
+
 ### Windows-Workstation
 
 Python 3 muss installiert sein. Danach in einer PowerShell mit
