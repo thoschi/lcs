@@ -141,12 +141,16 @@ function Write-ClientEnv {
    Require-ServerUrl
    $proxy = Read-EnvValue $ClientEnv 'LCS_PROXY'
    $ca = Read-EnvValue $ClientEnv 'LCS_CA_FILE'
+   $userData = Read-EnvValue $ClientEnv 'LCS_USER_DATA'
+   $requireLocalUsername = Read-EnvValue $ClientEnv 'LCS_REQUIRE_LOCAL_USERNAME'
    $lines = @(
       "LCS_SERVER=$ServerUrl", 'LCS_HEARTBEAT_SECONDS=20', 'LCS_POLL_SECONDS=10', 'LCS_SYNC_SECONDS=60',
       "LCS_STATE_ROOT=$StateRoot", "LCS_FEATURE_ROOT=$FeatureRoot", "LCS_TOKEN_FILE=$EnrollmentToken", 'LCS_CHANNEL=stable'
    )
    if ($proxy) { $lines += "LCS_PROXY=$proxy" }
    if ($ca) { $lines += "LCS_CA_FILE=$ca" }
+   if ($userData) { $lines += "LCS_USER_DATA=$userData" }
+   if ($requireLocalUsername) { $lines += "LCS_REQUIRE_LOCAL_USERNAME=$requireLocalUsername" }
    Write-Utf8 $ClientEnv (($lines -join "`r`n") + "`r`n")
 }
 
@@ -184,6 +188,8 @@ function Install-UserClient {
    Copy-Tree (Join-Path $SourceRoot 'client') $ClientRoot
    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $ClientRoot 'linux')
    $python = New-Venv $ClientRoot
+   & $python -m pip install --quiet -r (Join-Path $ClientRoot 'requirements.txt')
+   if ($LASTEXITCODE) { throw 'Abhängigkeiten des LCS-User-Clients konnten nicht installiert werden.' }
    Write-ClientEnv
    $pythonw = Join-Path $ClientRoot 'venv\Scripts\pythonw.exe'
    $script = Join-Path $ClientRoot 'user_client.py'
@@ -195,7 +201,7 @@ function Install-UserClient {
    $shell = New-Object -ComObject WScript.Shell
    $shortcut = $shell.CreateShortcut($shortcutPath)
    $shortcut.TargetPath = $pythonw
-   $shortcut.Arguments = '"{0}"' -f $script
+   $shortcut.Arguments = '"{0}" --show' -f $script
    $shortcut.WorkingDirectory = $ClientRoot
    $shortcut.Save()
    Write-Host "LCS-User-Client installiert: $ClientRoot"

@@ -1,4 +1,5 @@
 import getpass
+import hashlib
 import json
 import os
 import sys
@@ -10,7 +11,7 @@ BASE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BASE))
 
 from capability_runtime import load_stack, run_capability
-from common.config import load_env
+from common.config import env_bool, load_env
 from common.http_client import request_json
 
 VERSION = '0.6.0'
@@ -45,6 +46,36 @@ def prepare_user_data(data_dir):
    return data_dir
 
 
+def store_path(data_root, username):
+   name = ''.join(c if c.isalnum() or c in '._-' else '_' for c in username).strip('._') or 'user'
+   suffix = hashlib.sha256(username.encode('utf-8')).hexdigest()[:10]
+   return data_root / 'stores' / (name[:48] + '-' + suffix)
+
+
+def load_store(user_file, data_root):
+   try:
+      selected = json.loads(user_file.read_text(encoding='utf-8')).get('store', '')
+      path = data_root / 'stores' / selected
+      profile = json.loads((path / 'credentials.json').read_text(encoding='utf-8'))
+      if path.parent == data_root / 'stores' and profile.get('username') and profile.get('password'):
+         return path, profile
+   except Exception:
+      pass
+   return None, {}
+
+
+def save_store(user_file, data_root, username, password):
+   path = prepare_user_data(store_path(data_root, username))
+   credentials = path / 'credentials.json'
+   credentials.write_text(json.dumps({'username': username, 'password': password}, indent=2), encoding='utf-8')
+   user_file.parent.mkdir(parents=True, exist_ok=True)
+   user_file.write_text(json.dumps({'store': path.name}, indent=2), encoding='utf-8')
+   if os.name != 'nt':
+      credentials.chmod(0o600)
+      user_file.chmod(0o600)
+   return path
+
+
 def load_device(path):
    try:
       data = json.loads(path.read_text(encoding='utf-8'))
@@ -53,23 +84,15 @@ def load_device(path):
       return None
 
 
-def remember_username(path, username):
-   path.parent.mkdir(parents=True, exist_ok=True)
-   path.write_text(json.dumps({'username': username}, indent=2), encoding='utf-8')
-
-
-def remembered_username(path):
-   try:
-      return json.loads(path.read_text(encoding='utf-8')).get('username', '')
-   except Exception:
-      return ''
-
-
 def login(config, device_id, username, password):
    return request_json(
       'POST', config['LCS_SERVER'].rstrip('/') + '/api/v1/user/login',
       {'device_id': device_id, 'username': username, 'password': password, 'user_client_version': VERSION},
       ca_file=config.get('LCS_CA_FILE') or None)
+
+
+def local_username_allowed(config, username):
+   return not env_bool(config, 'LCS_REQUIRE_LOCAL_USERNAME') or username.casefold() == getpass.getuser().casefold()
 
 
 def session_heartbeat(config, token):
@@ -104,14 +127,18 @@ def poll_user_actions(config, token):
                        ca_file=config.get('LCS_CA_FILE') or None, timeout=8)
 
 
-def run_cli(config, device_id, user_file, feature_root):
-   username = remembered_username(user_file) or input('Benutzername: ').strip()
-   password = getpass.getpass('Passwort: ')
+def run_cli(config, device_id, user_file, feature_root, data_root):
+   _store, profile = load_store(user_file, data_root)
+   username = profile.get('username') or input('Benutzername: ').strip()
+   password = profile.get('password') or getpass.getpass('Passwort: ')
+   if not local_username_allowed(config, username):
+      print('Anmeldung fehlgeschlagen: Benutzername entspricht nicht dem lokalen Anmeldenamen.')
+      return 1
    status, response = login(config, device_id, username, password)
    if status != 200:
       print('Anmeldung fehlgeschlagen:', response.get('error', response))
       return 1
-   remember_username(user_file, username)
+   save_store(user_file, data_root, username, password)
    print('Angemeldet als', username)
    generation, caps = user_capabilities(feature_root)
    print('Lokaler Fähigkeits-Stack Generation', generation)
@@ -120,7 +147,7 @@ def run_cli(config, device_id, user_file, feature_root):
    return 0
 
 
-def run_gui(config, device_id, user_file, feature_root, data_dir):
+def run_gui(config, device_id, user_file, feature_root, data_root):
    import tkinter as tk
    from tkinter import messagebox
 
@@ -128,12 +155,10 @@ def run_gui(config, device_id, user_file, feature_root, data_dir):
    root.title('LCS Benutzer')
    root.minsize(470, 300)
 
-   try:
-      scheduled = json.loads((data_dir / 'state' / 'scheduler.json').read_text(encoding='utf-8'))
-   except Exception:
-      scheduled = {}
+   data_dir, saved_profile = load_store(user_file, data_root)
+   scheduled = {}
    session = {'token': None, 'username': '', 'generation': None, 'running': True,
-              'action_password': None, 'scheduled': scheduled, 'started': set()}
+              'password': '', 'scheduled': scheduled, 'started': set(), 'tray': None}
 
    login_frame = tk.Frame(root, padx=18, pady=18)
    login_frame.pack(fill='both', expand=True)
@@ -144,7 +169,7 @@ def run_gui(config, device_id, user_file, feature_root, data_dir):
    tk.Label(form, text='Benutzername', width=14, anchor='w').grid(row=0, column=0, pady=5)
    username = tk.Entry(form, width=32)
    username.grid(row=0, column=1, pady=5, sticky='ew')
-   username.insert(0, remembered_username(user_file))
+   username.insert(0, saved_profile.get('username', ''))
    tk.Label(form, text='Passwort', width=14, anchor='w').grid(row=1, column=0, pady=5)
    password = tk.Entry(form, width=32, show='*')
    password.grid(row=1, column=1, pady=5, sticky='ew')
@@ -163,6 +188,8 @@ def run_gui(config, device_id, user_file, feature_root, data_dir):
    options_frame.pack(fill='both', expand=True)
    refresh_button = tk.Button(menu_frame, text='Optionen neu laden')
    refresh_button.pack(anchor='e', pady=(12, 0))
+   switch_button = tk.Button(menu_frame, text='Benutzer wechseln')
+   switch_button.pack(anchor='e', pady=(6, 0))
 
    def heartbeat_loop():
       while session['running'] and session['token']:
@@ -175,14 +202,7 @@ def run_gui(config, device_id, user_file, feature_root, data_dir):
    def action_password(cap):
       if not cap.get('requires_password'):
          return ''
-      if session['action_password'] is not None:
-         return session['action_password']
-      from tkinter import simpledialog
-      reason = cap.get('password_reason') or ('Für „%s“ ist Ihr Passwort erforderlich.' % cap.get('title', cap['id']))
-      secret = simpledialog.askstring('Passwort erforderlich', reason, show='*', parent=root)
-      if secret is not None:
-         session['action_password'] = secret
-      return secret
+      return session['password']
 
    def execute_capability(cap, parameters=None, action_id=None, notify=True):
       secret = action_password(cap)
@@ -270,7 +290,10 @@ def run_gui(config, device_id, user_file, feature_root, data_dir):
       secret = password.get()
       if not name or not secret:
          messagebox.showerror('Anmeldung', 'Benutzername und Passwort sind erforderlich.')
-         return
+         return False
+      if not local_username_allowed(config, name):
+         messagebox.showerror('Anmeldung', 'Der Benutzername entspricht nicht dem lokalen Anmeldenamen.')
+         return False
       status_label.configure(text='Anmeldung läuft …')
       root.update_idletasks()
       try:
@@ -278,14 +301,20 @@ def run_gui(config, device_id, user_file, feature_root, data_dir):
       except Exception as exc:
          status_label.configure(text='')
          messagebox.showerror('Anmeldung', 'Server nicht erreichbar: %s' % exc)
-         return
+         return False
       if code != 200:
          status_label.configure(text='')
          messagebox.showerror('Anmeldung', response.get('error', 'Anmeldung fehlgeschlagen.'))
-         return
-      remember_username(user_file, name)
+         return False
+      nonlocal data_dir
+      data_dir = save_store(user_file, data_root, name, secret)
+      try:
+         session['scheduled'] = json.loads((data_dir / 'state' / 'scheduler.json').read_text(encoding='utf-8'))
+      except Exception:
+         session['scheduled'] = {}
       session['token'] = response['session_token']
       session['username'] = name
+      session['password'] = secret
       password.delete(0, tk.END)
       login_frame.pack_forget()
       header.configure(text='Angemeldet als ' + (response.get('full_name') or name))
@@ -293,18 +322,57 @@ def run_gui(config, device_id, user_file, feature_root, data_dir):
       load_menu(force=True)
       threading.Thread(target=heartbeat_loop, daemon=True).start()
       root.after(0, run_automatic_and_disposable)
+      return True
+
+   def show_window():
+      root.deiconify()
+      root.lift()
+
+   def switch_user():
+      session['token'] = None
+      session['password'] = ''
+      session['generation'] = None
+      session['started'].clear()
+      menu_frame.pack_forget()
+      username.delete(0, tk.END)
+      password.delete(0, tk.END)
+      login_frame.pack(fill='both', expand=True)
+      show_window()
+
+   def start_tray():
+      try:
+         import pystray
+         from PIL import Image, ImageDraw
+         image = Image.new('RGB', (64, 64), '#245c8a')
+         ImageDraw.Draw(image).text((17, 20), 'LCS', fill='white')
+         session['tray'] = pystray.Icon('lcs-client', image, 'LCS Client', pystray.Menu(
+            pystray.MenuItem('Öffnen', lambda: root.after(0, show_window), default=True),
+            pystray.MenuItem('Beenden', lambda: root.after(0, close))))
+         session['tray'].run_detached()
+      except Exception as exc:
+         print('Tray-Symbol nicht verfügbar:', exc)
 
    login_button.configure(command=do_login)
    refresh_button.configure(command=lambda: load_menu(force=True))
+   switch_button.configure(command=switch_user)
    password.bind('<Return>', lambda _event: do_login())
    root.after(5000, check_stack_change)
 
    def close():
       session['running'] = False
       session['token'] = None
+      if session['tray']:
+         session['tray'].stop()
       root.destroy()
 
-   root.protocol('WM_DELETE_WINDOW', close)
+   root.protocol('WM_DELETE_WINDOW', root.withdraw)
+   start_tray()
+   if saved_profile:
+      username.delete(0, tk.END)
+      username.insert(0, saved_profile['username'])
+      password.insert(0, saved_profile['password'])
+      if do_login() and '--show' not in sys.argv:
+         root.withdraw()
    root.mainloop()
    return 0
 
@@ -312,8 +380,7 @@ def run_gui(config, device_id, user_file, feature_root, data_dir):
 def main():
    env_path = config_path()
    config = load_env(env_path)
-   device_path, user_file, default_feature_root, data_dir = runtime_paths(config)
-   prepare_user_data(data_dir)
+   device_path, user_file, default_feature_root, data_root = runtime_paths(config)
    proxy = config.get('LCS_PROXY', '').strip()
    if proxy:
       os.environ['http_proxy'] = proxy
@@ -329,12 +396,12 @@ def main():
       print('Das Gerät wurde noch nicht vom System-Agenten registriert.')
       return 3
    if '--cli' in sys.argv:
-      return run_cli(config, device_id, user_file, feature_root)
+      return run_cli(config, device_id, user_file, feature_root, data_root)
    try:
-      return run_gui(config, device_id, user_file, feature_root, data_dir)
+      return run_gui(config, device_id, user_file, feature_root, data_root)
    except Exception as exc:
       print('GUI nicht verfügbar:', exc)
-      return run_cli(config, device_id, user_file, feature_root)
+      return run_cli(config, device_id, user_file, feature_root, data_root)
 
 
 if __name__ == '__main__':
