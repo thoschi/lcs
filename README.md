@@ -171,16 +171,21 @@ LCS_STATE_ROOT=/opt/mein-lcs-service/state \
 
 Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`, `LCS_STATE_ROOT`, `LCS_FEATURE_ROOT`, `LCS_SERVER_ENV`, `LCS_CLIENT_ENV`, `LCS_SERVER_TOKEN` und `LCS_ENROLLMENT_TOKEN`.
 
-`LCS_USER_DATA` legt optional den persönlichen Datenspeicher des User-Clients
-fest (Standard: `~/.config/lcs/data`, unter Windows `%APPDATA%\LCS\data`). Beim
-Start werden darin `backgrounds`, `printers` und `state` angelegt. User-Capabilities
-erhalten den Pfad als `context["data_path"]`.
+`LCS_USER_DATA` legt optional die Wurzel der Benutzerspeicher fest (Standard:
+`~/.config/lcs/data`, unter Windows `%APPDATA%\LCS\data`). Für jeden angemeldeten
+LCS-Benutzer entsteht darunter ein eigener Store. Der zuletzt gewählte Store wird
+beim Autostart ohne Rückfrage angemeldet; das Fenster bleibt dabei im Tray. Der
+Menüeintrag öffnet es ausdrücklich. Zugangsdaten werden im persönlichen Store
+gespeichert (unter POSIX mit Modus `0600`). Mit `LCS_REQUIRE_LOCAL_USERNAME=true`
+kann optional verlangt werden, dass der LCS-Benutzername dem lokalen Anmeldenamen
+entspricht; standardmäßig sind beide unabhängig. User-Capabilities erhalten den
+jeweiligen Store als `context["data_path"]`.
 
 Capabilities können `startup`-, `interval`- oder tägliche `daily`-Trigger besitzen. Ohne Trigger
 sind sie manuell bzw. als einmalige Serveraktion nutzbar; abgearbeitete Aktionen
 werden aus der Queue gelöscht, ihr Ergebnis bleibt im Ereignisprotokoll. Bei
-`"requires_password": true` fragt der User-Client das Passwort mit dem Text aus
-`password_reason` genau einmal je Sitzung ab. Die Bedingung
+`"requires_password": true` übergibt der Capability die Zugangsdaten des aktiven
+Stores. Die Bedingung
 `{"type": "password_unset"}` führt eine Aktion nur aus, wenn `passwd -S` sicher
 den Zustand `NP` (kein Passwort) meldet. Auch ein gesperrtes Passwort (`L`) gilt
 als vorhanden. Bei unbekanntem Zustand wird die Aktion bewusst

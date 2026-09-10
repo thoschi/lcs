@@ -374,9 +374,11 @@ write_client_env() {
    ensure_server_url
    mkdir -p "$LCS_SERVICE_ROOT"
 
-   local proxy ca
+   local proxy ca user_data require_local_username
    proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
    ca="$(read_env_value "$LCS_CLIENT_ENV" LCS_CA_FILE)"
+   user_data="$(read_env_value "$LCS_CLIENT_ENV" LCS_USER_DATA)"
+   require_local_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_REQUIRE_LOCAL_USERNAME)"
    if [ -z "$proxy" ]; then
       proxy="$(read_env_value /etc/lcs/client.env LCS_PROXY)"
       [ -z "$proxy" ] && proxy="$(read_env_value /etc/lmn-client/client.env LMN_PROXY)"
@@ -398,6 +400,8 @@ LCS_CHANNEL=stable
 EOF2
    [ -n "$proxy" ] && printf 'LCS_PROXY=%s\n' "$proxy" >> "$LCS_CLIENT_ENV"
    [ -n "$ca" ] && printf 'LCS_CA_FILE=%s\n' "$ca" >> "$LCS_CLIENT_ENV"
+   [ -n "$user_data" ] && printf 'LCS_USER_DATA=%s\n' "$user_data" >> "$LCS_CLIENT_ENV"
+   [ -n "$require_local_username" ] && printf 'LCS_REQUIRE_LOCAL_USERNAME=%s\n' "$require_local_username" >> "$LCS_CLIENT_ENV"
    chmod 644 "$LCS_CLIENT_ENV"
    chown root:root "$LCS_CLIENT_ENV"
 }
@@ -448,6 +452,7 @@ install_client() {
    cp -a "$SOURCE_ROOT/client/." "$LCS_CLIENT_ROOT/"
    rm -rf "$LCS_CLIENT_ROOT/linux" "$LCS_CLIENT_ROOT/venv"
    python3 -m venv "$LCS_CLIENT_ROOT/venv"
+   "$LCS_CLIENT_ROOT/venv/bin/pip" install -q -r "$LCS_CLIENT_ROOT/requirements.txt"
 
    if ! python3 -c "import tkinter" >/dev/null 2>&1; then
       echo "Hinweis: python3-tk fehlt. Vor dem Imaging installieren: apt install python3-tk" >&2
