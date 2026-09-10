@@ -2,6 +2,7 @@ import json
 import os
 import secrets
 import time
+import tarfile
 from functools import wraps
 from pathlib import Path
 
@@ -18,6 +19,7 @@ RELEASES = Path(os.environ.get('LCS_RELEASES_DIR', str(BASE / 'releases')))
 MANIFEST = Path(os.environ.get('LCS_MANIFEST_FILE', str(BASE / 'bootstrap-manifest.json')))
 TOKEN_FILE = Path(os.environ.get('LCS_TOKEN_FILE', str(BASE / '.token')))
 MAX_REQUEST_BYTES = int(os.environ.get('LCS_MAX_REQUEST_BYTES', str(2 * 1024 * 1024)))
+SOURCE_ROOT = Path(os.environ.get('LCS_SOURCE_ROOT', '/opt/lcs'))
 ADMIN_USERS = {value.strip() for value in os.environ.get('LCS_ADMIN_USERS', '').split(',') if value.strip()}
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
@@ -188,6 +190,21 @@ def bootstrap_package(filename):
    return send_file(target, mimetype='application/zip', conditional=True)
 
 
+@app.get('/api/v1/update/source')
+def update_source():
+   if not device():
+      return jsonify(error='unauthorized'), 401
+   if not (SOURCE_ROOT / 'install.sh').is_file():
+      return jsonify(error='server source tree unavailable'), 503
+   archive = RELEASES / 'lcs-source.tar.gz'
+   with tarfile.open(archive, 'w:gz') as output:
+      for name in ('install.sh', 'install.ps1', 'VERSION', 'server', 'system', 'client'):
+         path = SOURCE_ROOT / name
+         if path.exists():
+            output.add(path, arcname=name, filter=lambda item: None if '__pycache__' in item.name else item)
+   return send_file(archive, mimetype='application/gzip', conditional=True)
+
+
 @app.get('/api/v1/agent/poll')
 def agent_poll():
    return api_result(core.poll_actions(request.headers.get('X-Device-ID', ''), bearer()))
@@ -204,6 +221,7 @@ def agent_api(endpoint):
    device_id = request.headers.get('X-Device-ID', '')
    routes = {
       'enroll': lambda: core.enroll(payload),
+      'token/claim': lambda: core.claim_enrollment_token(payload.get('hostname', ''), payload.get('password', '')),
       'heartbeat': lambda: core.heartbeat(device_id, bearer(), payload),
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
@@ -269,6 +287,7 @@ def client_status():
       'agent_version': item['agent_version'] or '',
       'groups': item['groups'] or '',
       'hardware': item['hardware'],
+      'is_image_source': bool(item.get('is_image_source')),
    } for item in devices], now=core.now_ts())
 
 
@@ -349,12 +368,13 @@ def delete_group(name):
 def create_token():
    check_csrf()
    try:
-      token = core.add_enrollment_token(request.form.get('name', ''))
+      core.add_enrollment_token(request.form.get('name', ''), request.form.get('hostname', ''),
+                                request.form.get('password', ''))
    except Exception as exc:
       flash(str(exc), 'error')
       return redirect(url_for('admin') + '#tokens')
-   flash('Token erzeugt. Er wird nur jetzt vollständig angezeigt.', 'success')
-   return render_admin(new_token=token)
+   flash('Image-Zugang erzeugt. Der Token wird nur an den passenden Installer ausgegeben.', 'success')
+   return redirect(url_for('admin') + '#tokens')
 
 
 @app.post('/admin/token/<int:token_id>/toggle')

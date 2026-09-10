@@ -146,11 +146,18 @@ def init_db():
       columns = {row['name'] for row in conn.execute('PRAGMA table_info(devices)').fetchall()}
       if 'stack_generation' not in columns:
          conn.execute('ALTER TABLE devices ADD COLUMN stack_generation INTEGER NOT NULL DEFAULT 0')
+      if 'is_image_source' not in columns:
+         conn.execute('ALTER TABLE devices ADD COLUMN is_image_source INTEGER NOT NULL DEFAULT 0')
       action_columns = {row['name'] for row in conn.execute('PRAGMA table_info(actions)').fetchall()}
       if 'scope' not in action_columns:
          conn.execute("ALTER TABLE actions ADD COLUMN scope TEXT NOT NULL DEFAULT 'system'")
       if 'username' not in action_columns:
          conn.execute("ALTER TABLE actions ADD COLUMN username TEXT NOT NULL DEFAULT ''")
+      token_columns = {row['name'] for row in conn.execute('PRAGMA table_info(enrollment_tokens)').fetchall()}
+      if 'hostname' not in token_columns:
+         conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN hostname TEXT NOT NULL DEFAULT ''")
+      if 'password_hash' not in token_columns:
+         conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
 
 
 def token_hash(token):
@@ -173,17 +180,35 @@ def verify_password(password, stored):
       return False
 
 
-def add_enrollment_token(name, token=None):
+def add_enrollment_token(name, hostname='', password='', token=None):
    name = str(name).strip()
    if not name:
       raise ValueError('Token-Name fehlt')
-   token = token or secrets.token_urlsafe(32)
+   hostname = str(hostname).strip().lower()
+   if not hostname:
+      raise ValueError('Hostname fehlt')
+   if not password:
+      raise ValueError('Passwort fehlt')
+   token = token or hashlib.sha256((name + '\0' + hostname + '\0' + password).encode('utf-8')).hexdigest()
    with db() as conn:
+      if conn.execute('SELECT 1 FROM enrollment_tokens WHERE hostname=?', (hostname,)).fetchone():
+         raise ValueError('Für diesen Hostnamen existiert bereits ein Image-Zugang')
       conn.execute('''
-         INSERT INTO enrollment_tokens(name, token_hash, token_prefix, created_at)
-         VALUES(?,?,?,?)
-      ''', (name, token_hash(token), token[:8], now_ts()))
+         INSERT INTO enrollment_tokens(name, token_hash, token_prefix, created_at, hostname, password_hash)
+         VALUES(?,?,?,?,?,?)
+      ''', (name, token_hash(token), token[:8], now_ts(), hostname, password_hash(password)))
    return token
+
+
+def claim_enrollment_token(hostname, password):
+   hostname = str(hostname).strip().lower()
+   with db() as conn:
+      row = conn.execute('SELECT * FROM enrollment_tokens WHERE hostname=? AND enabled=1',
+                         (hostname,)).fetchone()
+   if not row or not verify_password(str(password), row['password_hash']):
+      return 403, {'error': 'Hostname oder Passwort ist ungültig'}
+   token = hashlib.sha256((row['name'] + '\0' + hostname + '\0' + str(password)).encode('utf-8')).hexdigest()
+   return 200, {'enrollment_token': token}
 
 
 def create_reenrollment_token(device_id):
@@ -222,7 +247,7 @@ def enroll(payload, enrollment_token=''):
    one_time_hash = token_hash(supplied_token) if supplied_token else ''
    with db() as conn:
       reusable = conn.execute('''
-         SELECT id FROM enrollment_tokens WHERE token_hash=? AND enabled=1
+         SELECT id, hostname FROM enrollment_tokens WHERE token_hash=? AND enabled=1
       ''', (one_time_hash,)).fetchone()
       legacy_ok = bool(enrollment_token) and hmac.compare_digest(supplied_token, enrollment_token)
       one_time = conn.execute('''
@@ -236,17 +261,19 @@ def enroll(payload, enrollment_token=''):
       device_token = secrets.token_urlsafe(32)
       now = now_ts()
       conn.execute('''
-         INSERT INTO devices(id, token_hash, hostname, machine_id, platform, agent_version, first_seen, last_seen)
-         VALUES(?,?,?,?,?,?,?,?)
+         INSERT INTO devices(id, token_hash, hostname, machine_id, platform, agent_version, first_seen, last_seen, is_image_source)
+         VALUES(?,?,?,?,?,?,?,?,?)
          ON CONFLICT(machine_id) DO UPDATE SET
             token_hash=excluded.token_hash,
             hostname=excluded.hostname,
             platform=excluded.platform,
             agent_version=excluded.agent_version,
-            last_seen=excluded.last_seen
+            last_seen=excluded.last_seen,
+            is_image_source=excluded.is_image_source
       ''', (
          device_id, token_hash(device_token), hostname, machine_id,
-         payload.get('platform', ''), payload.get('agent_version', ''), now, now
+         payload.get('platform', ''), payload.get('agent_version', ''), now, now,
+         int(bool(reusable and reusable['hostname'].lower() == hostname.lower()))
       ))
       if one_time:
          conn.execute('DELETE FROM enrollment_codes WHERE machine_id=? AND token_hash=?', (machine_id, one_time_hash))
@@ -257,7 +284,8 @@ def enroll(payload, enrollment_token=''):
          ''', (now, reusable['id']))
       conn.execute('DELETE FROM enrollment_codes WHERE expires_at<?', (now_ts(),))
       log_event(conn, device_id, '', 'system', 'enroll', '', {'hostname': hostname})
-   return 200, {'device_id': device_id, 'device_token': device_token}
+   return 200, {'device_id': device_id, 'device_token': device_token,
+                'image_source': bool(reusable and reusable['hostname'].lower() == hostname.lower())}
 
 
 def authenticate_device(device_id, token):
@@ -431,8 +459,6 @@ def action_result(device_id, token, payload):
       log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
       if row['capability_id'] == '__lcs_reset_device__' and status == 'done':
          delete_device_data(conn, device['id'])
-      else:
-         conn.execute('DELETE FROM actions WHERE id=?', (action_id,))
    return 200, {'ok': True}
 
 

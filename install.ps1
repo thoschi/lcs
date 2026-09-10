@@ -14,6 +14,13 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $SourceRoot = $PSScriptRoot
+$Operation = 'install'
+if ($Mode -in @('install', 'upgrade')) {
+   $Operation = $Mode
+   $Mode = $ServerUrl
+   $ServerUrl = if ($InstallerArgs.Count) { $InstallerArgs[0] } else { '' }
+   $InstallerArgs = if ($InstallerArgs.Count -gt 1) { $InstallerArgs[1..($InstallerArgs.Count - 1)] } else { @() }
+}
 $TokenSource = if ($TokenFile) { $TokenFile } else { $env:LCS_TOKEN_SOURCE }
 
 $ServerRoot = if ($env:LCS_SERVER_ROOT) { $env:LCS_SERVER_ROOT } else { Join-Path $env:ProgramFiles 'LCS\Server' }
@@ -134,6 +141,15 @@ function Ensure-EnrollmentToken {
       Protect-File $EnrollmentToken
       return
    }
+   if (($Operation -eq 'install') -and $ServerUrl) {
+      $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
+      $password = $credential.GetNetworkCredential().Password
+      $body = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
+      $response = Invoke-RestMethod -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json' -Body $body
+      Write-Utf8 $EnrollmentToken ($response.enrollment_token + "`r`n")
+      Protect-File $EnrollmentToken
+      return
+   }
    throw 'Für einen frischen Systemdienst fehlt der Enrollment-Token.'
 }
 
@@ -170,12 +186,8 @@ function Install-SystemService {
    & $python $serviceScript remove 2>$null | Out-Null
    & $python $serviceScript --startup auto install
    if ($LASTEXITCODE) { throw 'LCS-Systemdienst konnte nicht installiert werden.' }
-   if (Test-Path (Join-Path $StateRoot 'device.json')) {
-      & $python $serviceScript start
-      Write-Host 'Vorhandener LCS-Systemdienst wurde nach dem Update gestartet.'
-   } else {
-      Write-Host 'Frischer LCS-Systemdienst ist automatisch startend eingerichtet, für das Masterimage aber noch nicht gestartet.'
-   }
+   & $python $serviceScript start
+   Write-Host 'LCS-Systemdienst wurde gestartet.'
    Write-Host "LCS-Systemdienst installiert: $ServiceRoot"
    Write-Host "Konfiguration: $ClientEnv"
    Write-Host "State: $StateRoot"
@@ -250,7 +262,7 @@ function Install-Server {
    $serverLines = @(
       "LCS_SERVER_DB=$(Join-Path $ServerRoot 'data\lcs.sqlite3')", 'LCS_SESSION_TTL=120', 'LCS_ACTION_LEASE=180',
       'LCS_ACTION_PREFETCH=86400', "LCS_SERVER_HOST=$($values.LCS_SERVER_HOST)", "LCS_SERVER_PORT=$($values.LCS_SERVER_PORT)",
-      "LCS_RELEASES_DIR=$(Join-Path $ServerRoot 'releases')", "LCS_MANIFEST_FILE=$(Join-Path $ServerRoot 'bootstrap-manifest.json')",
+      "LCS_RELEASES_DIR=$(Join-Path $ServerRoot 'releases')", "LCS_SOURCE_ROOT=$SourceRoot", "LCS_MANIFEST_FILE=$(Join-Path $ServerRoot 'bootstrap-manifest.json')",
       "LCS_TOKEN_FILE=$ServerToken", "LCS_SECRET_KEY=$secret", "LCS_OIDC_DISCOVERY_URL=$($values.LCS_OIDC_DISCOVERY_URL)",
       "LCS_OIDC_CLIENT_ID=$($values.LCS_OIDC_CLIENT_ID)", "LCS_OIDC_CLIENT_SECRET=$($values.LCS_OIDC_CLIENT_SECRET)",
       "LCS_ADMIN_USERS=$($values.LCS_ADMIN_USERS)", 'LCS_MAX_REQUEST_BYTES=2097152'

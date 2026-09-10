@@ -2,7 +2,10 @@ import json
 import os
 import subprocess
 import sys
+import tarfile
+import tempfile
 import time
+import urllib.request
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -97,10 +100,12 @@ def enroll(config, state_dir):
       ca_file=config.get('LCS_CA_FILE') or None)
    if status != 200:
       raise RuntimeError('Enrollment failed: %s' % response)
-   state = {'device_id': response['device_id'], 'device_token': response['device_token']}
+   state = {'device_id': response['device_id'], 'device_token': response['device_token'],
+            'hostname': info['hostname'], 'image_source': bool(response.get('image_source'))}
    save_state(state_dir, state)
    try:
-      token_path.unlink(missing_ok=True)
+      if not state['image_source']:
+         token_path.unlink(missing_ok=True)
    except Exception as exc:
       print('warning: could not remove enrollment token:', exc, flush=True)
    return state
@@ -282,6 +287,21 @@ def execute_due_actions(config, state, stack, state_dir):
             return
          reset_device(config, state, action.get('parameters', {}).get('reenrollment_token', ''))
          return
+      if cap_id in ('__lcs_update_git__', '__lcs_update_bundle__'):
+         try:
+            result = schedule_update(config, state, cap_id == '__lcs_update_bundle__')
+         except Exception as exc:
+            ok = False
+            result = {'error': str(exc)}
+         payload = {'action_id': action_id, 'ok': ok, 'result': result}
+         try:
+            status, _ = post_device(config, state, '/api/v1/action/result', payload)
+            if status != 200:
+               save_action_result(state_dir, payload)
+         except Exception:
+            save_action_result(state_dir, payload)
+         completed.append(key)
+         continue
       cap = capabilities.get(cap_id)
       if not cap:
          ok = False
@@ -305,6 +325,44 @@ def execute_due_actions(config, state, stack, state_dir):
       pending.pop(key, None)
    if completed:
       save_json(pending_path, list(pending.values()), 0o600)
+
+
+def schedule_update(config, state, from_server=False):
+   if os.name == 'nt':
+      raise RuntimeError('Die integrierte Aktualisierung ist derzeit nur unter Linux verfügbar')
+   source_root = Path(config.get('LCS_SOURCE_ROOT', '/opt/lcs'))
+   if from_server:
+      archive = Path(tempfile.gettempdir()) / 'lcs-update.tar.gz'
+      request = urllib.request.Request(config['LCS_SERVER'].rstrip('/') + '/api/v1/update/source',
+                                       headers=auth_headers(state))
+      context = None
+      ca_file = config.get('LCS_CA_FILE')
+      if ca_file:
+         import ssl
+         context = ssl.create_default_context(cafile=ca_file)
+      with urllib.request.urlopen(request, timeout=120, context=context) as response, archive.open('wb') as target:
+         target.write(response.read())
+      with tarfile.open(archive, 'r:gz') as package:
+         for member in package.getmembers():
+            if member.name.startswith('/') or '..' in Path(member.name).parts:
+               raise RuntimeError('Unsicherer Pfad im Update-Paket')
+      update = 'mkdir -p {root} && tar -xzf {archive} -C {root}'.format(
+         root=shlex_quote(str(source_root)), archive=shlex_quote(str(archive)))
+      method = 'server bundle'
+   else:
+      update = 'git -C {root} pull --ff-only'.format(root=shlex_quote(str(source_root)))
+      method = 'git pull'
+   installer = '{root}/install.sh upgrade workstation {server}'.format(
+      root=shlex_quote(str(source_root)), server=shlex_quote(config['LCS_SERVER']))
+   command = 'sleep 2; {update} && {installer}'.format(update=update, installer=installer)
+   subprocess.Popen(['/bin/systemd-run', '--unit=lcs-upgrade', '--collect', '/bin/bash', '-c', command],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+   return {'message': 'update scheduled', 'method': method}
+
+
+def shlex_quote(value):
+   import shlex
+   return shlex.quote(value)
 
 def reset_device(config, state, reenrollment_token=''):
    paths = runtime_paths(config)
@@ -356,6 +414,10 @@ def run_forever(env_path=None, stop_requested=None):
    poll_interval = int(config.get('LCS_POLL_SECONDS', '10'))
    sync_interval = int(config.get('LCS_SYNC_SECONDS', '60'))
    state = load_state(paths['state_dir'])
+   current_hostname = hardware_info()['hostname']
+   if state.get('hostname') and state['hostname'].lower() != current_hostname.lower():
+      # A clone must never reuse the image source's device credentials.
+      state = {}
    if state.get('device_id'):
       save_json(Path(paths['state_dir']) / 'device-public.json', {'device_id': state['device_id']}, 0o644)
    stack = load_stack(config['LCS_FEATURE_ROOT'])

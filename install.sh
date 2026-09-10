@@ -2,7 +2,13 @@
 set -euo pipefail
 
 SOURCE_ROOT="$(cd "$(dirname "$0")" && pwd)"
+OPERATION="install"
 MODE="${1:-}"
+if [ "$MODE" = "install" ] || [ "$MODE" = "upgrade" ]; then
+   OPERATION="$MODE"
+   shift || true
+   MODE="${1:-}"
+fi
 shift || true
 
 SERVER_URL=""
@@ -31,13 +37,17 @@ fi
 usage() {
    cat <<EOF2
 Aufruf:
-  $0 server
+  $0 install server
+  $0 upgrade server
   $0 service https://clients.example --token-file /pfad/zur/token-datei
   $0 client https://clients.example
-  $0 workstation https://clients.example --token-file /pfad/zur/token-datei [--no-userclient]
+  $0 install workstation https://clients.example [--no-userclient]
+  $0 upgrade workstation https://clients.example [--no-userclient]
   $0 all https://clients.example
   $0 reset-identity
 
+install        Erstinstallation; fordert bei Bedarf das Image-Passwort an
+upgrade        Laufzeit aktualisieren, Identität und Token unverändert lassen
 server         Managementserver installieren/aktualisieren
 service        privilegierten LCS-Systemdienst installieren/aktualisieren
 client         grafischen LCS-User-Client installieren/aktualisieren
@@ -186,6 +196,22 @@ ensure_enrollment_token() {
       return
    fi
 
+   if [ "$OPERATION" = "install" ] && [ -n "$SERVER_URL" ]; then
+      local password response token
+      read -r -s -p "Passwort für $(hostname): " password </dev/tty
+      echo
+      response="$(curl -fsS -H 'Content-Type: application/json' \
+         --data "$(python3 -c 'import json,sys; print(json.dumps({"hostname":sys.argv[1],"password":sys.argv[2]}))' "$(hostname)" "$password")" \
+         "$SERVER_URL/api/v1/token/claim")" || {
+         echo "Token konnte nicht vom Server abgerufen werden." >&2
+         exit 1
+      }
+      token="$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["enrollment_token"])')"
+      printf '%s\n' "$token" > "$LCS_ENROLLMENT_TOKEN"
+      chmod 600 "$LCS_ENROLLMENT_TOKEN"
+      return
+   fi
+
    # Nur Migration: alte v0.4-Ablagen werden gelesen, aber niemals verändert.
    local candidate
    for candidate in \
@@ -237,6 +263,7 @@ LCS_ACTION_PREFETCH=86400
 LCS_SERVER_HOST=$old_host
 LCS_SERVER_PORT=$old_port
 LCS_RELEASES_DIR=$LCS_SERVER_ROOT/releases
+LCS_SOURCE_ROOT=$SOURCE_ROOT
 LCS_MANIFEST_FILE=$LCS_SERVER_ROOT/bootstrap-manifest.json
 LCS_TOKEN_FILE=$LCS_SERVER_TOKEN
 LCS_SECRET_KEY=$old_secret
@@ -432,12 +459,8 @@ install_service() {
    systemctl daemon-reload
    systemctl enable lcs-service.service
 
-   if [ -s "$LCS_STATE_ROOT/device.json" ]; then
-      systemctl start lcs-service.service
-      echo "Vorhandener LCS-Systemdienst wurde nach dem Update gestartet."
-   else
-      echo "Frischer LCS-Systemdienst ist aktiviert, aber für das Masterimage noch nicht gestartet."
-   fi
+   systemctl start lcs-service.service
+   echo "LCS-Systemdienst wurde gestartet."
 
    echo "LCS-Systemdienst installiert und aktiviert."
    echo "Runtime: $LCS_SERVICE_ROOT"
