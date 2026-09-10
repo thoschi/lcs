@@ -16,7 +16,7 @@ $LCSCTL capability-publish /opt/lcs-server/examples/capabilities/inventory
 $LCSCTL capability-assign inventory group:Beth
 $LCSCTL action group:Beth inventory
 $LCSCTL device-reset beth-042
-$LCSCTL token-create "Beth-Image 2026" BETH-MASTER 'passwort'
+$LCSCTL token-create "Beth-Image 2026" 'passwort'
 $LCSCTL tokens
 $LCSCTL token-revoke "Beth-Image 2026"
 ```
@@ -46,13 +46,23 @@ Proxy muss TLS terminieren, Host und Protokoll weiterreichen und `/`, `/admin`,
 
 ## Enrollment-Tokens
 
-Image-Zugänge bestehen aus Name, Hostname und Passwort. Der Installer ruft den
-wiederverwendbaren Token darüber ab; der Klartext wird nicht gespeichert. In der
-Weboberfläche kann ein Zugang jederzeit widerrufen oder erneut aktiviert werden.
+Enrollment-Zugänge bestehen aus Name und Passwort und sind nicht an einen
+Hostnamen gebunden. Ein Vorlagen-Token bereitet bei der ersten Anmeldung den
+Imaging-Rechner als reinen Vorlagen-Client vor; erst seine Klone werden als
+fertige Clients registriert. Ein unabhängiger Token registriert dagegen sofort
+einen fertigen Client und wird nach dieser Anmeldung gelöscht.
+
+Beim Anlegen erzeugen beide Token-Arten eine dauerhafte Gruppe namens
+`Enrollment: <Name>`. Fertige Clients werden bereits während des Enrollments
+Mitglied dieser Gruppe. Der Token oder der Vorlagen-Client kann später gelöscht
+werden, ohne die Gruppe zu entfernen. Gruppen lassen sich in der Aktionsplanung
+mit Aufgaben für neue Mitglieder vorbelegen. Diese Aufgaben werden schon beim
+Enrollment in die Warteschlange des Clients geschrieben und stehen daher bei
+seinem ersten Start bereit. Passwörter und Klartext-Tokens werden nicht gespeichert.
 
 ## Clients generalisieren und löschen
 
-**Generalisieren** plant einen Reset als Systemaktion ein. Der Client bestätigt
+**Identität zurücksetzen** (vormals „Generalisieren“) plant einen Reset als Systemaktion ein. Der Client bestätigt
 den Auftrag, entfernt danach Geräteidentität, Enrollment-Token, Scheduler-State
 und Capability-Cache und stoppt seinen Systemdienst. Mit der Bestätigung löscht
 der Server gleichzeitig Sessions, Aktionen, Ereignisse, Gruppen- und

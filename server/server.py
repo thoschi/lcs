@@ -174,10 +174,15 @@ def dashboard_data():
          GROUP BY d.id ORDER BY d.hostname
       ''').fetchall()]
       groups = [dict(row) for row in conn.execute('''
-         SELECT g.*, COUNT(dg.device_id) AS device_count
+         SELECT g.*, COUNT(DISTINCT dg.device_id) AS device_count,
+            COUNT(DISTINCT at.id) AS preset_count
          FROM groups g LEFT JOIN device_groups dg ON dg.group_name=g.name
+         LEFT JOIN action_templates at ON at.group_name=g.name
          GROUP BY g.name ORDER BY g.name
       ''').fetchall()]
+      presets = conn.execute('SELECT id, group_name, capability_id FROM action_templates ORDER BY id').fetchall()
+      for group in groups:
+         group['presets'] = [dict(row) for row in presets if row['group_name'] == group['name']]
       assignments = [dict(row) for row in conn.execute(
          'SELECT * FROM capability_assignments ORDER BY capability_id, target_type, target_id').fetchall()]
       tokens = [dict(row) for row in conn.execute(
@@ -430,10 +435,21 @@ def delete_group(name):
    check_csrf()
    with core.db() as conn:
       conn.execute('DELETE FROM device_groups WHERE group_name=?', (name,))
+      conn.execute('DELETE FROM action_templates WHERE group_name=?', (name,))
       conn.execute("DELETE FROM capability_assignments WHERE target_type='group' AND target_id=?", (name,))
       conn.execute('DELETE FROM groups WHERE name=?', (name,))
    bump_generation()
    flash('Gruppe gelöscht.', 'success')
+   return redirect(url_for('admin') + '#groups')
+
+
+@app.post('/admin/action-template/<int:template_id>/delete')
+@admin_required
+def delete_action_template(template_id):
+   check_csrf()
+   with core.db() as conn:
+      conn.execute('DELETE FROM action_templates WHERE id=?', (template_id,))
+   flash('Vorbereitete Aufgabe entfernt.', 'success')
    return redirect(url_for('admin') + '#groups')
 
 
@@ -445,12 +461,12 @@ def create_token():
       settings = core.enrollment_settings(
          request.form.get('user_data', ''), request.form.get('require_local_username') == '1',
          request.form.get('password_username', ''))
-      core.add_enrollment_token(request.form.get('name', ''), request.form.get('hostname', ''),
-                                request.form.get('password', ''), settings=settings)
+      core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
+                                request.form.get('token_type', 'template') == 'template', settings=settings)
    except Exception as exc:
       flash(str(exc), 'error')
       return redirect(url_for('admin') + '#tokens')
-   flash('Image-Zugang erzeugt. Der Token wird nur an den passenden Installer ausgegeben.', 'success')
+   flash('Vorläufiger Zugang erzeugt. Er wird beim ersten Enrollment aktiviert.', 'success')
    return redirect(url_for('admin') + '#tokens')
 
 
@@ -569,19 +585,36 @@ def create_action():
    check_csrf()
    try:
       parameters = json.loads(request.form.get('parameters', '{}'))
-      devices = core.resolve_devices(request.form.get('target', ''))
-      if not devices:
+      target = request.form.get('target', '')
+      devices = core.resolve_devices(target)
+      remember = request.form.get('remember') == '1' and target.startswith('group:')
+      if not devices and not remember:
          raise ValueError('Kein Client für dieses Ziel gefunden.')
+      capability_id = request.form.get('capability', '')
+      capability = next((item for item in load_manifest().get('capabilities', [])
+                         if item.get('id') == capability_id), {})
+      scope = capability.get('scope', 'system')
+      username = request.form.get('username', '').strip()
+      if remember:
+         with core.db() as conn:
+            group_name = target.split(':', 1)[1]
+            conn.execute('''INSERT INTO action_templates(
+               group_name, capability_id, parameters_json, scope, username, created_at)
+               VALUES(?,?,?,?,?,?)''', (group_name, capability_id,
+               json.dumps(parameters, ensure_ascii=False), scope, username, int(time.time())))
+            if not capability_id.startswith('__lcs_'):
+               conn.execute('''INSERT INTO capability_assignments(capability_id, target_type, target_id, enabled)
+                  VALUES(?, 'group', ?, 1) ON CONFLICT(capability_id, target_type, target_id)
+                  DO UPDATE SET enabled=1''', (capability_id, group_name))
+         bump_generation()
       for target_device in devices:
-         capability_id = request.form.get('capability', '')
-         capability = next((item for item in load_manifest().get('capabilities', [])
-                            if item.get('id') == capability_id), {})
          core.queue_action(target_device['id'], capability_id, parameters, int(time.time()),
-                           capability.get('scope', 'system'), request.form.get('username', '').strip())
+                           scope, username)
    except (ValueError, json.JSONDecodeError) as exc:
       flash(str(exc), 'error')
    else:
-      flash('%d Aktion(en) eingeplant.' % len(devices), 'success')
+      flash('%d Aktion(en) eingeplant%s.' % (len(devices),
+            ' und für neue Gruppenmitglieder vorgemerkt' if remember else ''), 'success')
    return redirect(url_for('admin') + '#actions')
 
 
