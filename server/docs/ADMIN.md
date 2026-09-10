@@ -16,7 +16,7 @@ $LCSCTL capability-publish /opt/lcs-server/examples/capabilities/inventory
 $LCSCTL capability-assign inventory group:Beth
 $LCSCTL action group:Beth inventory
 $LCSCTL device-reset beth-042
-$LCSCTL token-create "Beth-Image 2026"
+$LCSCTL token-create "Beth-Image 2026" BETH-MASTER 'passwort'
 $LCSCTL tokens
 $LCSCTL token-revoke "Beth-Image 2026"
 ```
@@ -46,9 +46,9 @@ Proxy muss TLS terminieren, Host und Protokoll weiterreichen und `/`, `/admin`,
 
 ## Enrollment-Tokens
 
-Tokens sind benannt und für mehrere Geräte eines Images wiederverwendbar. In der
-Weboberfläche kann ein Token jederzeit widerrufen oder erneut aktiviert werden.
-Der Klartext wird nicht gespeichert und nur beim Erzeugen angezeigt. Der bei
+Image-Zugänge bestehen aus Name, Hostname und Passwort. Der Installer ruft den
+wiederverwendbaren Token darüber ab; der Klartext wird nicht gespeichert. In der
+Weboberfläche kann ein Zugang jederzeit widerrufen oder erneut aktiviert werden. Der bei
 der Erstinstallation erzeugte Token wird als `Legacy-Token` importiert und kann
 danach genauso widerrufen werden.
 

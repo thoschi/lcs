@@ -39,34 +39,24 @@ curl http://127.0.0.1:5000/health
 
 ## Frische Workstation / Masterimage
 
-Den Enrollment-Token sicher vom Server auf den Master übertragen, z. B. nach `/root/lcs-enrollment.token`, und dann:
+Zuerst in der Webadministration einen Image-Zugang mit dem Hostnamen des
+Masterrechners und einem Passwort anlegen. Danach:
 
 ```bash
 cd /opt/lcs
-./install.sh workstation https://clients.corvi.schule \
-   --token-file /root/lcs-enrollment.token
+./install.sh install workstation https://clients.corvi.schule
 ```
 
-Installiert werden:
-
-```text
-/opt/lcs-service/
-/opt/lcs-client/
-```
-
-Bei einem frischen Image wird der Systemdienst aktiviert, aber bewusst nicht
-gestartet. Erst ein echter Client soll sich enrollen. Erkennt der Installer
-hingegen eine vorhandene Geräteidentität, startet er den Dienst nach dem Update
-sofort wieder.
-
-Nach erfolgreichem Enrollment löscht der Agent `/opt/lcs-service/enrollment.token`.
+Der Installer fragt das Passwort verdeckt ab und lädt den Token. Der Dienst
+startet sofort; der Rechner erscheint als Image-Vorlage. Auf einem Klon erkennt
+der Agent den geänderten Hostnamen, verwirft die kopierte Identität und enrollt
+den Rechner separat. Nur die Image-Vorlage behält die Token-Datei.
 
 ## Client bleibt in der Verwaltung offline
 
 Die Registrierung allein belegt nur ein erfolgreiches Enrollment. Als online gilt
 ein Client erst, wenn sein Systemdienst innerhalb der letzten 60 Sekunden einen
-Heartbeat gesendet hat. Bei einem frischen Linux-Image ist der Dienst absichtlich
-nur aktiviert und läuft erst nach dem nächsten Start. Für einen Test ohne Neustart:
+Heartbeat gesendet hat. Der Dienst wird bereits vom Installer gestartet. Zur Diagnose:
 
 ```bash
 systemctl start lcs-service.service
@@ -97,8 +87,7 @@ Administratorrechten:
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
 cd C:\Pfad\zu\lcs
-.\install.ps1 workstation https://clients.corvi.schule `
-   --token-file C:\Pfad\lcs-enrollment.token
+.\install.ps1 install workstation https://clients.corvi.schule
 ```
 
 `install.ps1` bietet wie `install.sh` die Modi `server`, `service`/`system`,
@@ -111,7 +100,7 @@ cd C:\Pfad\zu\lcs
 
 ```bash
 cd /opt/lcs
-./install.sh workstation https://clients.corvi.schule
+./install.sh upgrade workstation https://clients.corvi.schule
 ```
 
 Ein neuer Bootstrap-Token ist nicht nötig, solange `/opt/lcs-service/state/device.json` vorhanden ist.
