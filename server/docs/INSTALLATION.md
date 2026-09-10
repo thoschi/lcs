@@ -38,8 +38,11 @@ curl http://127.0.0.1:5000/health
 
 ## Frische Workstation / Masterimage
 
-Zuerst in der Webadministration einen Image-Zugang mit dem Hostnamen des
-Masterrechners, einem Passwort und den gewünschten Client-Einstellungen anlegen.
+Zuerst in der Webadministration einen vorläufigen Vorlagenzugang mit einem
+Passwort und den gewünschten Client-Einstellungen anlegen.
+Dabei entsteht zugleich eine dauerhafte Enrollment-Gruppe. Aufgaben, die dort
+für neue Mitglieder vorgemerkt werden, erhalten die späteren Klone bereits bei
+ihrer ersten Registrierung.
 Dazu gehören insbesondere der Benutzerdatenpfad und optional die Bindung an den
 lokalen Benutzernamen. Danach:
 

@@ -125,6 +125,15 @@ def init_db():
          enabled INTEGER NOT NULL DEFAULT 1,
          PRIMARY KEY(capability_id, target_type, target_id)
       );
+      CREATE TABLE IF NOT EXISTS action_templates (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         group_name TEXT NOT NULL,
+         capability_id TEXT NOT NULL,
+         parameters_json TEXT NOT NULL DEFAULT '{}',
+         scope TEXT NOT NULL DEFAULT 'system',
+         username TEXT NOT NULL DEFAULT '',
+         created_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS enrollment_codes (
          machine_id TEXT NOT NULL,
          token_hash TEXT NOT NULL,
@@ -150,6 +159,8 @@ def init_db():
          conn.execute('ALTER TABLE devices ADD COLUMN is_image_source INTEGER NOT NULL DEFAULT 0')
       if 'settings_json' not in columns:
          conn.execute("ALTER TABLE devices ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'")
+      if 'template_device_id' not in columns:
+         conn.execute("ALTER TABLE devices ADD COLUMN template_device_id TEXT NOT NULL DEFAULT ''")
       action_columns = {row['name'] for row in conn.execute('PRAGMA table_info(actions)').fetchall()}
       if 'scope' not in action_columns:
          conn.execute("ALTER TABLE actions ADD COLUMN scope TEXT NOT NULL DEFAULT 'system'")
@@ -162,6 +173,22 @@ def init_db():
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
       if 'settings_json' not in token_columns:
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'")
+      if 'token_type' not in token_columns:
+         conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN token_type TEXT NOT NULL DEFAULT 'template'")
+      if 'template_device_id' not in token_columns:
+         conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN template_device_id TEXT NOT NULL DEFAULT ''")
+      if 'group_name' not in token_columns:
+         conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN group_name TEXT NOT NULL DEFAULT ''")
+      conn.execute('''UPDATE enrollment_tokens SET template_device_id=COALESCE((
+         SELECT id FROM devices
+         WHERE devices.is_image_source=1 AND lower(devices.hostname)=lower(enrollment_tokens.hostname)
+         LIMIT 1), '')
+         WHERE hostname<>'' AND template_device_id='' ''')
+      for row in conn.execute("SELECT id, name FROM enrollment_tokens WHERE group_name='' ").fetchall():
+         group_name = 'Enrollment: ' + row['name']
+         conn.execute('INSERT OR IGNORE INTO groups(name, description) VALUES(?,?)',
+                      (group_name, 'Automatisch für Enrollment-Zugang ' + row['name']))
+         conn.execute('UPDATE enrollment_tokens SET group_name=? WHERE id=?', (group_name, row['id']))
 
 
 def token_hash(token):
@@ -200,36 +227,38 @@ def enrollment_settings(user_data='', require_local_username=False, password_use
    return settings
 
 
-def add_enrollment_token(name, hostname='', password='', token=None, settings=None):
+def add_enrollment_token(name, password='', template=True, token=None, settings=None):
    name = str(name).strip()
    if not name:
       raise ValueError('Token-Name fehlt')
-   hostname = str(hostname).strip().lower()
-   if not hostname:
-      raise ValueError('Hostname fehlt')
    if not password:
       raise ValueError('Passwort fehlt')
-   token = token or hashlib.sha256((name + '\0' + hostname + '\0' + password).encode('utf-8')).hexdigest()
+   token = token or hashlib.sha256((name + '\0' + str(password)).encode('utf-8')).hexdigest()
+   group_name = 'Enrollment: ' + name
    with db() as conn:
-      if conn.execute('SELECT 1 FROM enrollment_tokens WHERE hostname=?', (hostname,)).fetchone():
-         raise ValueError('Für diesen Hostnamen existiert bereits ein Image-Zugang')
+      conn.execute('INSERT OR IGNORE INTO groups(name, description) VALUES(?,?)',
+                   (group_name, 'Automatisch für Enrollment-Zugang ' + name))
       conn.execute('''
          INSERT INTO enrollment_tokens(
-            name, token_hash, token_prefix, created_at, hostname, password_hash, settings_json
-         ) VALUES(?,?,?,?,?,?,?)
-      ''', (name, token_hash(token), token[:8], now_ts(), hostname, password_hash(password),
-            json.dumps(settings or {}, ensure_ascii=False)))
+            name, token_hash, token_prefix, created_at, hostname, password_hash, settings_json, token_type, group_name
+         ) VALUES(?,?,?,?,?,?,?,?,?)
+      ''', (name, token_hash(token), token[:8], now_ts(), '', password_hash(password),
+            json.dumps(settings or {}, ensure_ascii=False), 'template' if template else 'single', group_name))
    return token
 
 
 def claim_enrollment_token(hostname, password):
    hostname = str(hostname).strip().lower()
    with db() as conn:
-      row = conn.execute('SELECT * FROM enrollment_tokens WHERE hostname=? AND enabled=1',
-                         (hostname,)).fetchone()
-   if not row or not verify_password(str(password), row['password_hash']):
-      return 403, {'error': 'Hostname oder Passwort ist ungültig'}
-   token = hashlib.sha256((row['name'] + '\0' + hostname + '\0' + str(password)).encode('utf-8')).hexdigest()
+      rows = conn.execute('SELECT * FROM enrollment_tokens WHERE enabled=1').fetchall()
+   matches = [row for row in rows if verify_password(str(password), row['password_hash']) and
+              (not row['hostname'] or row['hostname'].lower() == hostname)]
+   if len(matches) != 1:
+      return 403, {'error': 'Passwort ist ungültig oder nicht eindeutig'}
+   row = matches[0]
+   # Bestehende, hostnamegebundene Zugänge bleiben während der Migration nutzbar.
+   material = row['name'] + '\0' + ((row['hostname'] + '\0') if row['hostname'] else '') + str(password)
+   token = hashlib.sha256(material.encode('utf-8')).hexdigest()
    try:
       settings = json.loads(row['settings_json'] or '{}')
    except (json.JSONDecodeError, TypeError):
@@ -263,7 +292,8 @@ def enroll(payload):
    one_time_hash = token_hash(supplied_token) if supplied_token else ''
    with db() as conn:
       reusable = conn.execute('''
-         SELECT id, hostname, settings_json FROM enrollment_tokens WHERE token_hash=? AND enabled=1
+         SELECT id, hostname, settings_json, token_type, template_device_id, group_name
+         FROM enrollment_tokens WHERE token_hash=? AND enabled=1
       ''', (one_time_hash,)).fetchone()
       one_time = conn.execute('''
          SELECT 1 FROM enrollment_codes
@@ -276,8 +306,8 @@ def enroll(payload):
       device_token = secrets.token_urlsafe(32)
       now = now_ts()
       conn.execute('''
-         INSERT INTO devices(id, token_hash, hostname, machine_id, platform, agent_version, first_seen, last_seen, is_image_source, settings_json)
-         VALUES(?,?,?,?,?,?,?,?,?,?)
+         INSERT INTO devices(id, token_hash, hostname, machine_id, platform, agent_version, first_seen, last_seen, is_image_source, settings_json, template_device_id)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(machine_id) DO UPDATE SET
             token_hash=excluded.token_hash,
             hostname=excluded.hostname,
@@ -285,20 +315,28 @@ def enroll(payload):
             agent_version=excluded.agent_version,
             last_seen=excluded.last_seen,
             is_image_source=excluded.is_image_source,
-            settings_json=excluded.settings_json
+            settings_json=excluded.settings_json,
+            template_device_id=excluded.template_device_id
       ''', (
          device_id, token_hash(device_token), hostname, machine_id,
          payload.get('platform', ''), payload.get('agent_version', ''), now, now,
-         int(bool(reusable and reusable['hostname'].lower() == hostname.lower())),
-         reusable['settings_json'] if reusable else '{}'
+         int(bool(reusable and reusable['token_type'] == 'template' and not reusable['template_device_id'])),
+         reusable['settings_json'] if reusable else '{}',
+         reusable['template_device_id'] if reusable else ''
       ))
       if one_time:
          conn.execute('DELETE FROM enrollment_codes WHERE machine_id=? AND token_hash=?', (machine_id, one_time_hash))
       if reusable:
-         conn.execute('''
-            UPDATE enrollment_tokens
-            SET last_used_at=?, enrollment_count=enrollment_count+1 WHERE id=?
-         ''', (now, reusable['id']))
+         if reusable['token_type'] == 'single':
+            _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
+            conn.execute('DELETE FROM enrollment_tokens WHERE id=?', (reusable['id'],))
+         elif not reusable['template_device_id']:
+            conn.execute('''UPDATE enrollment_tokens SET template_device_id=?, last_used_at=?,
+               enrollment_count=enrollment_count+1 WHERE id=?''', (device_id, now, reusable['id']))
+         else:
+            conn.execute('''UPDATE enrollment_tokens SET last_used_at=?, enrollment_count=enrollment_count+1
+               WHERE id=?''', (now, reusable['id']))
+            _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
       conn.execute('DELETE FROM enrollment_codes WHERE expires_at<?', (now_ts(),))
       log_event(conn, device_id, '', 'system', 'enroll', '', {'hostname': hostname})
    settings = {}
@@ -308,8 +346,18 @@ def enroll(payload):
       except (json.JSONDecodeError, TypeError):
          pass
    return 200, {'device_id': device_id, 'device_token': device_token,
-                'image_source': bool(reusable and reusable['hostname'].lower() == hostname.lower()),
+                'image_source': bool(reusable and reusable['token_type'] == 'template' and
+                                     not reusable['template_device_id']),
                 'settings': settings}
+
+
+def _apply_enrollment_group(conn, device_id, group_name, now):
+   conn.execute('INSERT OR IGNORE INTO device_groups(group_name, device_id) VALUES(?,?)',
+                (group_name, device_id))
+   conn.execute('''INSERT INTO actions(
+      device_id, capability_id, parameters_json, run_at, status, created_at, scope, username)
+      SELECT ?, capability_id, parameters_json, ?, 'queued', ?, scope, username
+      FROM action_templates WHERE group_name=?''', (device_id, now, now, group_name))
 
 
 def authenticate_device(device_id, token):

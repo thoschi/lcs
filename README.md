@@ -86,8 +86,8 @@ Erwartet:
 
 ## Workstation installieren
 
-Für jedes Masterimage wird in der Webadministration ein Image-Zugang aus Name,
-Hostname des Beispielrechners, Passwort und den benötigten Client-Einstellungen
+Für jedes Masterimage wird in der Webadministration ein vorläufiger
+Vorlagenzugang aus Name, Passwort und den benötigten Client-Einstellungen
 angelegt. Die Erstinstallation benötigt neben der Serveradresse nur das Passwort
 und holt Enrollment-Token, Benutzerdatenpfad und Benutzerbindung direkt vom Server:
 
@@ -96,8 +96,10 @@ cd /opt/lcs
 ./install.sh install workstation https://clients.corvi.schule
 ```
 
-Der Dienst startet auch auf der Image-Vorlage. Sie erscheint online als
-**Image-Vorlage**, behält aber den Token für die geklonten Rechner. Der Agent
+Der zuerst angemeldete Rechner wird zur reinen **Image-Vorlage** und behält den
+Token für die geklonten Rechner. Die fertigen Klone treten bei ihrer
+Registrierung der beim Token angelegten Enrollment-Gruppe bei. Dort vorgemerkte
+Aufgaben stehen dadurch bereits bei ihrem ersten Start bereit. Der Agent
 speichert den Hostnamen in seiner Identität; ein Klon mit anderem Hostnamen
 verwirft die mitkopierte Geräteidentität automatisch und registriert sich mit
 dem Token als eigener Client.
@@ -149,8 +151,8 @@ cd /opt/lcs
 ./install.sh upgrade workstation https://clients.corvi.schule
 ```
 
-In der Clientübersicht der Webadministration kann ein Gerät generalisiert
-werden. Dabei erzeugt der Server einen einmaligen, 30 Tage gültigen Token und liefert
+In der Clientübersicht der Webadministration kann die Identität eines Geräts
+zurückgesetzt werden. Dabei erzeugt der Server einen einmaligen, 30 Tage gültigen Token und liefert
 ihn mit dem Rücksetzbefehl aus. Der Server wartet auf die Bestätigung des Clients;
 anschließend werden die lokale Identität und der Capability-Cache sowie sämtliche
 zugehörigen Serverdaten entfernt. Beim nächsten Dienststart registriert sich der Client
