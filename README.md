@@ -124,9 +124,11 @@ cd /opt/lcs
 ```
 
 In der Clientübersicht der Webadministration kann ein Gerät generalisiert
-werden. Der Server wartet dabei auf die Bestätigung des Clients; anschließend
-werden die lokale Identität und der Capability-Cache sowie sämtliche
-zugehörigen Serverdaten entfernt. Für nicht mehr erreichbare Geräte gibt es
+werden. Dabei erzeugt der Server einen einmaligen, 30 Tage gültigen Token und liefert
+ihn mit dem Rücksetzbefehl aus. Der Server wartet auf die Bestätigung des Clients;
+anschließend werden die lokale Identität und der Capability-Cache sowie sämtliche
+zugehörigen Serverdaten entfernt. Beim nächsten Dienststart registriert sich der Client
+mit dem neuen Token selbstständig wieder. Für nicht mehr erreichbare Geräte gibt es
 zusätzlich eine ausdrücklich serverseitige Sofortlöschung. Ergebnisse und
 Fehler normaler Systemaktionen werden in der Aktionstabelle angezeigt.
 

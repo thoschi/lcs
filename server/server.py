@@ -145,6 +145,10 @@ def dashboard_data():
       ''').fetchall()]
    for item in devices:
       item['online'] = item['last_seen'] >= now - 60
+      try:
+         item['hardware'] = json.loads(item.get('hardware_json') or '{}')
+      except json.JSONDecodeError:
+         item['hardware'] = {}
    return devices, groups, assignments, tokens, actions
 
 
@@ -246,6 +250,23 @@ def admin():
    return render_admin()
 
 
+@app.get('/admin/client-status')
+@admin_required
+def client_status():
+   devices, _, _, _, _ = dashboard_data()
+   return jsonify(devices=[{
+      'id': item['id'],
+      'online': item['online'],
+      'last_seen': item['last_seen'],
+      'last_seen_text': format_datetime(item['last_seen']),
+      'hostname': item['hostname'],
+      'platform': item['platform'] or '',
+      'agent_version': item['agent_version'] or '',
+      'groups': item['groups'] or '',
+      'hardware': item['hardware'],
+   } for item in devices], now=core.now_ts())
+
+
 @app.post('/admin/group')
 @admin_required
 def save_group():
@@ -282,11 +303,13 @@ def group_membership():
 def generalize_device(device_id):
    check_csrf()
    try:
-      core.queue_action(device_id, '__lcs_reset_device__', {}, core.now_ts())
+      reenrollment_token = core.create_reenrollment_token(device_id)
+      core.queue_action(device_id, '__lcs_reset_device__',
+                        {'reenrollment_token': reenrollment_token}, core.now_ts())
    except ValueError as exc:
       flash(str(exc), 'error')
    else:
-      flash('Generalisierung eingeplant. Der Client wird erst nach seiner Bestätigung entfernt.', 'success')
+      flash('Generalisierung eingeplant. Ein neuer einmaliger Token wird an den Client ausgeliefert.', 'success')
    return redirect(url_for('admin') + '#devices')
 
 

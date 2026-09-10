@@ -41,6 +41,9 @@ def hardware_info():
       info['manufacturer'] = _cmd(['powershell', '-NoProfile', '-Command', "(Get-CimInstance Win32_ComputerSystem).Manufacturer"])
       info['model'] = _cmd(['powershell', '-NoProfile', '-Command', "(Get-CimInstance Win32_ComputerSystem).Model"])
       info['bios'] = _cmd(['powershell', '-NoProfile', '-Command', "(Get-CimInstance Win32_BIOS).SMBIOSBIOSVersion"])
+      info['serial_number'] = _cmd(['powershell', '-NoProfile', '-Command', "(Get-CimInstance Win32_BIOS).SerialNumber"])
+      info['mac_addresses'] = [value for value in _cmd(['powershell', '-NoProfile', '-Command',
+         "(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True').MACAddress"]).splitlines() if value]
       info['memory_bytes'] = _cmd(['powershell', '-NoProfile', '-Command', "(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"])
    else:
       def read_dmi(name):
@@ -49,6 +52,9 @@ def hardware_info():
       info['manufacturer'] = read_dmi('sys_vendor')
       info['model'] = read_dmi('product_name')
       info['bios'] = read_dmi('bios_version')
+      info['serial_number'] = read_dmi('product_serial')
+      info['mac_addresses'] = sorted({address.read_text().strip() for address in Path('/sys/class/net').glob('*/address')
+                                      if address.is_file() and address.read_text().strip() != '00:00:00:00:00:00'})
       try:
          for line in Path('/proc/meminfo').read_text().splitlines():
             if line.startswith('MemTotal:'):
