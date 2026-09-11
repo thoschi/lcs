@@ -79,6 +79,8 @@ def save_store(user_file, data_root, username, password):
 def load_device(path):
    try:
       data = json.loads(path.read_text(encoding='utf-8'))
+      if data.get('image_source'):
+         return None
       return data.get('device_id')
    except Exception:
       return None
@@ -411,7 +413,7 @@ def main():
    feature_root = Path(config.get('LCS_FEATURE_ROOT', str(default_feature_root)))
    device_id = load_device(device_path)
    if not device_id:
-      print('Das Gerät wurde noch nicht vom System-Agenten registriert.')
+      print('Kein aktiver Client: Gerät ist noch nicht registriert oder dient als Image-Vorlage.')
       return 3
    if '--cli' in sys.argv:
       return run_cli(config, device_id, user_file, feature_root, data_root)

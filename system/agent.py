@@ -72,7 +72,10 @@ def load_state(state_dir):
 
 def save_state(state_dir, state):
    save_json(Path(state_dir) / 'device.json', state, 0o600)
-   save_json(Path(state_dir) / 'device-public.json', {'device_id': state.get('device_id', '')}, 0o644)
+   save_json(Path(state_dir) / 'device-public.json', {
+      'device_id': state.get('device_id', ''),
+      'image_source': bool(state.get('image_source')),
+   }, 0o644)
 
 
 def save_server_settings(env_path, settings):
@@ -148,6 +151,13 @@ def heartbeat(config, state, stack):
       'stack_generation': int(stack.get('generation', 0)),
    }
    return post_device(config, state, '/api/v1/heartbeat', payload)
+
+
+def template_heartbeat(config, state):
+   return post_device(config, state, '/api/v1/heartbeat', {
+      'agent_version': VERSION,
+      'stack_generation': 0,
+   })
 
 
 def report_event(config, state, event_type, capability_id, payload, state_dir=None):
@@ -435,7 +445,10 @@ def run_forever(env_path=None, stop_requested=None):
       # A clone must never reuse the image source's device credentials.
       state = {}
    if state.get('device_id'):
-      save_json(Path(paths['state_dir']) / 'device-public.json', {'device_id': state['device_id']}, 0o644)
+      save_json(Path(paths['state_dir']) / 'device-public.json', {
+         'device_id': state['device_id'],
+         'image_source': bool(state.get('image_source')),
+      }, 0o644)
    stack = load_stack(config['LCS_FEATURE_ROOT'])
    last_heartbeat = 0
    last_poll = 0
@@ -453,6 +466,22 @@ def run_forever(env_path=None, stop_requested=None):
             print('enrollment unavailable:', exc, flush=True)
             time.sleep(3)
             continue
+
+      if state.get('image_source'):
+         if now - last_heartbeat >= heartbeat_interval:
+            try:
+               status, response = template_heartbeat(config, state)
+               if status == 401:
+                  state = {}
+                  last_heartbeat = now
+                  continue
+               if status != 200:
+                  print('template heartbeat failed:', response, flush=True)
+            except Exception as exc:
+               print('template heartbeat unavailable:', exc, flush=True)
+            last_heartbeat = now
+         time.sleep(1)
+         continue
 
       if now - last_sync >= sync_interval:
          try:

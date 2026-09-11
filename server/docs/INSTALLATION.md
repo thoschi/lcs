@@ -53,10 +53,12 @@ cd /opt/lcs
 
 Der Installer fragt ausschließlich das Passwort verdeckt ab und lädt den Token
 sowie die Einstellungen. Er trägt die Einstellungen automatisch in `client.env`
-ein. Der Dienst
-startet sofort; der Rechner erscheint als Image-Vorlage. Auf einem Klon erkennt
-der Agent den geänderten Hostnamen, verwirft die kopierte Identität und enrollt
-den Rechner separat. Nur die Image-Vorlage behält die Token-Datei.
+ein. Der Dienst startet sofort; der Rechner erscheint als Image-Vorlage und
+bleibt im Ruhemodus, in dem er ausschließlich seinen Online-Status meldet. Der
+User-Client beendet sich auf der Vorlage ohne Anmeldung. Auf einem Klon erkennt
+der Agent den geänderten Hostnamen, verwirft die kopierte Identität, enrollt den
+Rechner separat und aktiviert erst dort System- und Benutzerfunktionen. Nur die
+Image-Vorlage behält die Token-Datei.
 
 ## Client bleibt in der Verwaltung offline
 
@@ -128,4 +130,24 @@ LCS_SERVICE_ROOT=/opt/custom-service \
 LCS_STATE_ROOT=/opt/custom-service/state \
 ./install.sh service https://clients.corvi.schule \
    --token-file /root/lcs-enrollment.token
+```
+
+
+## Deinstallation
+
+Für einen vollständig sauberen erneuten Test entfernt `uninstall` Dienste,
+Autostart-Einträge, Laufzeitdateien, Konfiguration und lokalen Zustand. Ohne Ziel
+werden alle LCS-Komponenten entfernt; das Quellrepository `/opt/lcs` bleibt stets
+erhalten:
+
+```bash
+./install.sh uninstall
+./install.sh uninstall workstation
+```
+
+Unter Windows stehen dieselben Ziele zur Verfügung:
+
+```powershell
+.\install.ps1 uninstall
+.\install.ps1 uninstall workstation
 ```

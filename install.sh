@@ -4,7 +4,7 @@ set -euo pipefail
 SOURCE_ROOT="$(cd "$(dirname "$0")" && pwd)"
 OPERATION="install"
 MODE="${1:-}"
-if [ "$MODE" = "install" ] || [ "$MODE" = "upgrade" ]; then
+if [ "$MODE" = "install" ] || [ "$MODE" = "upgrade" ] || [ "$MODE" = "uninstall" ]; then
    OPERATION="$MODE"
    shift || true
    MODE="${1:-}"
@@ -42,11 +42,13 @@ Aufruf:
   $0 client https://clients.example
   $0 install workstation https://clients.example [--no-userclient]
   $0 upgrade workstation https://clients.example [--no-userclient]
+  $0 uninstall [server|service|client|workstation|all]
   $0 all https://clients.example
   $0 reset-identity
 
 install        Erstinstallation; fordert bei Bedarf das Image-Passwort an
 upgrade        Laufzeit aktualisieren, Identität und Token unverändert lassen
+uninstall      gewählte Installation vollständig entfernen (Standard: all)
 server         Managementserver installieren/aktualisieren
 service        privilegierten LCS-Systemdienst installieren/aktualisieren
 client         grafischen LCS-User-Client installieren/aktualisieren
@@ -70,8 +72,12 @@ EOF2
 }
 
 if [ -z "$MODE" ]; then
-   usage
-   exit 2
+   if [ "$OPERATION" = "uninstall" ]; then
+      MODE="all"
+   else
+      usage
+      exit 2
+   fi
 fi
 
 case "$MODE" in
@@ -484,6 +490,49 @@ reset_identity() {
    echo "Lokale LCS-Geräteidentität und Capability-Cache wurden gelöscht."
    echo "Der Dienst bleibt enabled, ist aber bis zum nächsten Start gestoppt."
 }
+
+uninstall_client() {
+   pkill -f "$LCS_CLIENT_ROOT/user_client.py" 2>/dev/null || true
+   remove_client_integration
+   rm -rf "$LCS_CLIENT_ROOT"
+   echo "LCS-User-Client entfernt."
+}
+
+uninstall_service() {
+   systemctl disable --now lcs-service.service 2>/dev/null || true
+   rm -f "$LCS_SYSTEMD_ROOT/lcs-service.service"
+   systemctl daemon-reload
+   rm -rf "$LCS_SERVICE_ROOT"
+   rm -rf /etc/lcs /var/lib/lcs
+   echo "LCS-Systemdienst und lokaler Zustand entfernt."
+}
+
+uninstall_server() {
+   systemctl disable --now lcs-server.service 2>/dev/null || true
+   rm -f "$LCS_SYSTEMD_ROOT/lcs-server.service"
+   systemctl daemon-reload
+   rm -rf "$LCS_SERVER_ROOT"
+   if id "$LCS_SERVER_USER" >/dev/null 2>&1; then
+      userdel "$LCS_SERVER_USER" 2>/dev/null || true
+   fi
+   echo "LCS-Server einschließlich seiner Daten entfernt."
+}
+
+uninstall_product() {
+   case "$MODE" in
+      client) uninstall_client ;;
+      service|system) uninstall_service ;;
+      workstation) uninstall_client; uninstall_service ;;
+      server) uninstall_server ;;
+      all) uninstall_client; uninstall_service; uninstall_server ;;
+      *) echo "Unbekanntes Uninstall-Ziel: $MODE" >&2; usage; exit 2 ;;
+   esac
+}
+
+if [ "$OPERATION" = "uninstall" ]; then
+   uninstall_product
+   exit 0
+fi
 
 case "$MODE" in
    server)
