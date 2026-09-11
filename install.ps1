@@ -15,12 +15,13 @@ param(
 $ErrorActionPreference = 'Stop'
 $SourceRoot = $PSScriptRoot
 $Operation = 'install'
-if ($Mode -in @('install', 'upgrade')) {
+if ($Mode -in @('install', 'upgrade', 'uninstall')) {
    $Operation = $Mode
    $Mode = $ServerUrl
    $ServerUrl = if ($InstallerArgs.Count) { $InstallerArgs[0] } else { '' }
    $InstallerArgs = if ($InstallerArgs.Count -gt 1) { $InstallerArgs[1..($InstallerArgs.Count - 1)] } else { @() }
 }
+if (($Operation -eq 'uninstall') -and -not $Mode) { $Mode = 'all' }
 $TokenSource = if ($TokenFile) { $TokenFile } else { $env:LCS_TOKEN_SOURCE }
 
 $ServerRoot = if ($env:LCS_SERVER_ROOT) { $env:LCS_SERVER_ROOT } else { Join-Path $env:ProgramFiles 'LCS\Server' }
@@ -41,6 +42,7 @@ Aufruf:
   .\install.ps1 client https://clients.example
   .\install.ps1 workstation https://clients.example --token-file C:\Pfad\token.txt [--no-userclient]
   .\install.ps1 all https://clients.example
+  .\install.ps1 uninstall [server|service|client|workstation|all]
   .\install.ps1 reset-identity
 
 Modi und Optionen entsprechen install.sh. Alle Laufzeitpfade können über
@@ -288,6 +290,42 @@ function Install-Server {
    Write-Host "Konfiguration: $ServerEnv"
 }
 
+
+function Uninstall-UserClient {
+   Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
+      Where-Object { $_.CommandLine -like "*$ClientRoot*user_client.py*" } |
+      ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+   Remove-UserClientIntegration
+   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ClientRoot
+   Write-Host 'LCS-User-Client entfernt.'
+}
+
+function Uninstall-SystemService {
+   & sc.exe stop LCSService 2>$null | Out-Null
+   & sc.exe delete LCSService 2>$null | Out-Null
+   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ServiceRoot
+   if (Test-Path $DataRoot) { Remove-Item -Recurse -Force $DataRoot }
+   Write-Host 'LCS-Systemdienst und lokaler Zustand entfernt.'
+}
+
+function Uninstall-Server {
+   & sc.exe stop LCSServer 2>$null | Out-Null
+   & sc.exe delete LCSServer 2>$null | Out-Null
+   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ServerRoot
+   Write-Host 'LCS-Server einschließlich seiner Daten entfernt.'
+}
+
+function Uninstall-Product {
+   switch ($Mode.ToLowerInvariant()) {
+      'client' { Uninstall-UserClient }
+      { $_ -in @('service', 'system') } { Uninstall-SystemService }
+      'workstation' { Uninstall-UserClient; Uninstall-SystemService }
+      'server' { Uninstall-Server }
+      'all' { Uninstall-UserClient; Uninstall-SystemService; Uninstall-Server }
+      default { Write-Error "Unbekanntes Uninstall-Ziel: $Mode"; Show-Usage; exit 2 }
+   }
+}
+
 function Reset-Identity {
    & sc.exe stop LCSService 2>$null | Out-Null
    @('device.json', 'device-public.json', 'scheduler.json', 'pending-actions.json', 'result-outbox.json', 'event-outbox.json') |
@@ -296,6 +334,8 @@ function Reset-Identity {
    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $FeatureRoot 'stack.json')
    Write-Host 'Lokale LCS-Geräteidentität und Capability-Cache wurden gelöscht.'
 }
+
+if ($Operation -eq 'uninstall') { Uninstall-Product; exit 0 }
 
 switch ($Mode.ToLowerInvariant()) {
    'server' { Install-Server }

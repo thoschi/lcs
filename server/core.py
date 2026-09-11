@@ -320,7 +320,8 @@ def enroll(payload):
       ''', (
          device_id, token_hash(device_token), hostname, machine_id,
          payload.get('platform', ''), payload.get('agent_version', ''), now, now,
-         int(bool(reusable and reusable['token_type'] == 'template' and not reusable['template_device_id'])),
+         int(bool(reusable and reusable['token_type'] == 'template' and
+                  reusable['template_device_id'] in ('', device_id))),
          reusable['settings_json'] if reusable else '{}',
          reusable['template_device_id'] if reusable else ''
       ))
@@ -333,7 +334,7 @@ def enroll(payload):
          elif not reusable['template_device_id']:
             conn.execute('''UPDATE enrollment_tokens SET template_device_id=?, last_used_at=?,
                enrollment_count=enrollment_count+1 WHERE id=?''', (device_id, now, reusable['id']))
-         else:
+         elif reusable['template_device_id'] != device_id:
             conn.execute('''UPDATE enrollment_tokens SET last_used_at=?, enrollment_count=enrollment_count+1
                WHERE id=?''', (now, reusable['id']))
             _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
@@ -347,7 +348,7 @@ def enroll(payload):
          pass
    return 200, {'device_id': device_id, 'device_token': device_token,
                 'image_source': bool(reusable and reusable['token_type'] == 'template' and
-                                     not reusable['template_device_id']),
+                                     reusable['template_device_id'] in ('', device_id)),
                 'settings': settings}
 
 
