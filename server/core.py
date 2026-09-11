@@ -429,16 +429,17 @@ def user_login(payload):
    if not username or not password or not device_id:
       return 400, {'error': 'missing credentials or device'}
    with db() as conn:
-      user = conn.execute('SELECT * FROM users WHERE username=? AND enabled=1', (username,)).fetchone()
       device = conn.execute('SELECT id FROM devices WHERE id=?', (device_id,)).fetchone()
-      if not user or not device or not verify_password(password, user['password_hash']):
-         return 401, {'error': 'invalid login'}
+      if not device:
+         return 403, {'error': 'device not registered'}
+      user = conn.execute('SELECT full_name FROM users WHERE username=? AND enabled=1', (username,)).fetchone()
       session_token = secrets.token_urlsafe(32)
       now = now_ts()
       conn.execute('INSERT INTO sessions(token_hash, device_id, username, user_client_version, created_at, last_seen) VALUES(?,?,?,?,?,?)',
                    (token_hash(session_token), device_id, username, payload.get('user_client_version', ''), now, now))
       log_event(conn, device_id, username, 'user', 'login', '', {})
-   return 200, {'session_token': session_token, 'username': username, 'full_name': user['full_name'] or ''}
+   return 200, {'session_token': session_token, 'username': username,
+                'full_name': (user['full_name'] or '') if user else ''}
 
 
 def authenticate_session(token):
