@@ -206,6 +206,10 @@ kann optional verlangt werden, dass der LCS-Benutzername dem lokalen Anmeldename
 entspricht; standardmäßig sind beide unabhängig. User-Capabilities erhalten den
 jeweiligen Store als `context["data_path"]`.
 
+Benutzername und Passwort legen die Zugangsdaten dieses lokalen Stores fest; der Server
+gleicht sie nicht mit seiner Benutzertabelle ab. Beim erstmaligen Anlegen lässt der
+Client das Passwort deshalb zur Vermeidung einer Fehleingabe zweimal eingeben.
+
 Capabilities können `startup`-, `interval`- oder tägliche `daily`-Trigger besitzen. Ohne Trigger
 sind sie manuell bzw. als einmalige Serveraktion nutzbar; abgearbeitete Aktionen
 werden aus der Queue gelöscht, ihr Ergebnis bleibt im Ereignisprotokoll. Bei

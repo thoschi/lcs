@@ -129,8 +129,14 @@ def poll_user_actions(config, token):
 
 def run_cli(config, device_id, user_file, feature_root, data_root):
    _store, profile = load_store(user_file, data_root)
-   username = profile.get('username') or input('Benutzername: ').strip()
-   password = profile.get('password') or getpass.getpass('Passwort: ')
+   username = profile.get('username')
+   password = profile.get('password')
+   while not username or not password:
+      username = input('Benutzername: ').strip()
+      password = getpass.getpass('Passwort: ')
+      if password != getpass.getpass('Passwort wiederholen: '):
+         print('Die Passwörter stimmen nicht überein. Bitte erneut eingeben.')
+         username = password = ''
    if not local_username_allowed(config, username):
       print('Anmeldung fehlgeschlagen: Benutzername entspricht nicht dem lokalen Anmeldenamen.')
       return 1
@@ -173,6 +179,9 @@ def run_gui(config, device_id, user_file, feature_root, data_root):
    tk.Label(form, text='Passwort', width=14, anchor='w').grid(row=1, column=0, pady=5)
    password = tk.Entry(form, width=32, show='*')
    password.grid(row=1, column=1, pady=5, sticky='ew')
+   tk.Label(form, text='Wiederholen (neu)', width=14, anchor='w').grid(row=2, column=0, pady=5)
+   password_confirmation = tk.Entry(form, width=32, show='*')
+   password_confirmation.grid(row=2, column=1, pady=5, sticky='ew')
 
    status_label = tk.Label(login_frame, text='', anchor='w')
    status_label.pack(fill='x', pady=(10, 4))
@@ -291,6 +300,13 @@ def run_gui(config, device_id, user_file, feature_root, data_root):
       if not name or not secret:
          messagebox.showerror('Anmeldung', 'Benutzername und Passwort sind erforderlich.')
          return False
+      creating_store = not (store_path(data_root, name) / 'credentials.json').is_file()
+      if creating_store and secret != password_confirmation.get():
+         messagebox.showerror('Anmeldung', 'Die Passwörter stimmen nicht überein. Bitte erneut eingeben.')
+         username.delete(0, tk.END)
+         password.delete(0, tk.END)
+         password_confirmation.delete(0, tk.END)
+         return False
       if not local_username_allowed(config, name):
          messagebox.showerror('Anmeldung', 'Der Benutzername entspricht nicht dem lokalen Anmeldenamen.')
          return False
@@ -316,6 +332,7 @@ def run_gui(config, device_id, user_file, feature_root, data_root):
       session['username'] = name
       session['password'] = secret
       password.delete(0, tk.END)
+      password_confirmation.delete(0, tk.END)
       login_frame.pack_forget()
       header.configure(text='Angemeldet als ' + (response.get('full_name') or name))
       menu_frame.pack(fill='both', expand=True)
@@ -336,6 +353,7 @@ def run_gui(config, device_id, user_file, feature_root, data_root):
       menu_frame.pack_forget()
       username.delete(0, tk.END)
       password.delete(0, tk.END)
+      password_confirmation.delete(0, tk.END)
       login_frame.pack(fill='both', expand=True)
       show_window()
 
