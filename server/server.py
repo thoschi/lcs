@@ -455,14 +455,14 @@ def create_token():
       settings = core.enrollment_settings(
          request.form.get('user_data', ''), request.form.get('require_local_username') == '1',
          request.form.get('password_username', ''))
-      core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
-                                request.form.get('token_type', 'template') == 'template', settings=settings,
-                                hostname=request.form.get('hostname', ''))
+      token = core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
+                                        request.form.get('token_type', 'template') == 'template', settings=settings,
+                                        hostname=request.form.get('hostname', ''))
    except Exception as exc:
       flash(str(exc), 'error')
       return redirect(url_for('admin') + '#tokens')
    flash('Vorläufiger Zugang erzeugt. Er wird beim ersten Enrollment aktiviert.', 'success')
-   return redirect(url_for('admin') + '#tokens')
+   return render_admin(new_token=token)
 
 
 @app.post('/admin/token/<int:token_id>/toggle')
