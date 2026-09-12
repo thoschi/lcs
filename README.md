@@ -217,12 +217,16 @@ die Eingaben nur über den lokalen Unix-Socket an den als root laufenden Systemd
 Dieser setzt erst danach das Passwort mit `chpasswd`, setzt in GDM
 `AutomaticLoginEnable=False` und sichert anschließend Benutzername und die vollständige
 zugehörige Zeile aus `/etc/shadow` mit Modus 0600 in `credentials.json`. Das
-Klartextpasswort wird weder gespeichert noch an den Managementserver übertragen.
+Klartextpasswort wird nicht gespeichert oder übertragen. Der Systemdienst hinterlegt
+Benutzername und Shadow-Zeile beim registrierten Rechner auf dem Managementserver,
+damit ein bereits bekannter Rechner sie nach dem Rücksetzen beim erneuten Enrollment
+automatisch wiederherstellen kann.
 
 Ein zufälliger Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
 (`/var/lib/lcs/system-initialized` beziehungsweise `%PROGRAMDATA%\LCS\system-initialized`).
 Fehlt die Systemkopie nach einer Synchronisierung, stellt Linux den gespeicherten
-Passworthash aus der gesicherten Shadow-Zeile ohne Rückfrage wieder her. Windows fragt in diesem Fall einmalig das
+Passworthash aus der lokalen oder beim Enrollment abgerufenen Shadow-Zeile ohne
+Rückfrage wieder her und deaktiviert den Autologin erneut. Windows fragt in diesem Fall einmalig das
 Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der
 Benutzerclient kommuniziert ausschließlich über den lokalen Socket mit dem
 Systemdienst und nimmt niemals Kontakt zum Server auf.

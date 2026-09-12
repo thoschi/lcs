@@ -176,7 +176,10 @@ def handle_user_request(config, runtime, request):
    if not runtime.get('client_enabled', False):
       return {'ok': False, 'error': 'Der Nutzerclient ist für einen Musterclient deaktiviert.'}
    if operation == 'initialize':
-      return initialize_user(config, str(request.get('username', '')).strip(), str(request.get('password', '')))
+      result = initialize_user(config, str(request.get('username', '')).strip(), str(request.get('password', '')))
+      if result.get('ok'):
+         runtime['credentials_synced'] = False
+      return result
    if operation == 'capabilities':
       return {'ok': True, 'capabilities': user_capabilities(runtime['stack'])}
    if operation == 'execute':
@@ -305,9 +308,18 @@ def enroll(config, state_dir):
    if status != 200:
       raise RuntimeError('Enrollment failed: %s' % response)
    save_server_settings(runtime_paths(config)['env'], response.get('settings', {}))
+   for key in ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME', 'LCS_PASSWORD_USERNAME'):
+      if response.get('settings', {}).get(key):
+         config[key] = str(response['settings'][key])
    state = {'device_id': response['device_id'], 'device_token': response['device_token'],
             'hostname': info['hostname'], 'image_source': bool(response.get('image_source'))}
    save_state(state_dir, state)
+   credentials = response.get('credentials')
+   if credentials and not state['image_source']:
+      save_json(user_profile_path(config), credentials, 0o600)
+      result = initialize_user(config)
+      if not result.get('ok'):
+         raise RuntimeError('Automatic user initialization failed: ' + result.get('error', 'unknown error'))
    try:
       if not state['image_source']:
          token_path.unlink(missing_ok=True)
@@ -327,6 +339,16 @@ def post_device(config, state, path, payload):
    return request_json(
       'POST', config['LCS_SERVER'].rstrip('/') + path, payload,
       headers=auth_headers(state), ca_file=config.get('LCS_CA_FILE') or None)
+
+
+def sync_user_credentials(config, state):
+   if os.name == 'nt':
+      return True
+   profile = load_json(user_profile_path(config), {})
+   if not profile.get('username') or not profile.get('shadow'):
+      return False
+   status, _ = post_device(config, state, '/api/v1/device/credentials', profile)
+   return status == 200
 
 
 def heartbeat(config, state, stack):
@@ -641,7 +663,8 @@ def run_forever(env_path=None, stop_requested=None):
       }, 0o644)
    stack = load_stack(config['LCS_FEATURE_ROOT'])
    user_runtime = {'stack': stack,
-                   'client_enabled': bool(state.get('device_id') and not state.get('image_source'))}
+                   'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
+                   'credentials_synced': False}
    threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
    last_poll = 0
@@ -657,6 +680,7 @@ def run_forever(env_path=None, stop_requested=None):
          # Hostnamen können erst nach dem Start des geklonten Systems gesetzt werden.
          state = {}
          user_runtime['client_enabled'] = False
+         user_runtime['credentials_synced'] = False
          for filename in ('device.json', 'device-public.json'):
             (Path(paths['state_dir']) / filename).unlink(missing_ok=True)
 
@@ -664,6 +688,7 @@ def run_forever(env_path=None, stop_requested=None):
          try:
             state = enroll(config, paths['state_dir'])
             user_runtime['client_enabled'] = not state.get('image_source')
+            user_runtime['credentials_synced'] = False
          except Exception as exc:
             print('enrollment unavailable:', exc, flush=True)
             time.sleep(3)
@@ -687,6 +712,17 @@ def run_forever(env_path=None, stop_requested=None):
             last_heartbeat = now
          time.sleep(1)
          continue
+
+      if not user_runtime['credentials_synced']:
+         try:
+            local_status = initialization_status(config)
+            if local_status['profile_exists'] and local_status['initialization_required'] and os.name != 'nt':
+               result = initialize_user(config)
+               if not result.get('ok'):
+                  raise RuntimeError(result.get('error', 'automatic user initialization failed'))
+            user_runtime['credentials_synced'] = sync_user_credentials(config, state)
+         except Exception as exc:
+            print('credential sync unavailable:', exc, flush=True)
 
       if now - last_sync >= sync_interval:
          try:
@@ -712,6 +748,7 @@ def run_forever(env_path=None, stop_requested=None):
             if code == 401:
                state = {}
                user_runtime['client_enabled'] = False
+               user_runtime['credentials_synced'] = False
                last_poll = now
                continue
          except Exception as exc:

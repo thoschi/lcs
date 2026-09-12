@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -162,6 +163,8 @@ def init_db():
          conn.execute("ALTER TABLE devices ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'")
       if 'template_device_id' not in columns:
          conn.execute("ALTER TABLE devices ADD COLUMN template_device_id TEXT NOT NULL DEFAULT ''")
+      if 'credentials_json' not in columns:
+         conn.execute("ALTER TABLE devices ADD COLUMN credentials_json TEXT NOT NULL DEFAULT '{}'")
       action_columns = {row['name'] for row in conn.execute('PRAGMA table_info(actions)').fetchall()}
       if 'scope' not in action_columns:
          conn.execute("ALTER TABLE actions ADD COLUMN scope TEXT NOT NULL DEFAULT 'system'")
@@ -327,7 +330,7 @@ def enroll(payload):
       ''', (machine_id, one_time_hash, now_ts())).fetchone()
       if not reusable and not one_time:
          return 403, {'error': 'invalid enrollment token'}
-      existing = conn.execute('SELECT id FROM devices WHERE machine_id=?', (machine_id,)).fetchone()
+      existing = conn.execute('SELECT id, credentials_json FROM devices WHERE machine_id=?', (machine_id,)).fetchone()
       device_id = existing['id'] if existing else secrets.token_hex(8)
       device_token = secrets.token_urlsafe(32)
       now = now_ts()
@@ -372,10 +375,17 @@ def enroll(payload):
          settings = json.loads(reusable['settings_json'] or '{}')
       except (json.JSONDecodeError, TypeError):
          pass
+   image_source = bool(reusable and reusable['token_type'] == 'template' and
+                       reusable['template_device_id'] in ('', device_id))
+   credentials = {}
+   if existing and not image_source:
+      try:
+         credentials = json.loads(existing['credentials_json'] or '{}')
+      except (json.JSONDecodeError, TypeError):
+         pass
    return 200, {'device_id': device_id, 'device_token': device_token,
-                'image_source': bool(reusable and reusable['token_type'] == 'template' and
-                                     reusable['template_device_id'] in ('', device_id)),
-                'settings': settings}
+                'image_source': image_source, 'settings': settings,
+                'credentials': credentials}
 
 
 def _apply_enrollment_group(conn, device_id, group_name, now):
@@ -395,6 +405,25 @@ def authenticate_device(device_id, token):
    if not row or not hmac.compare_digest(row['token_hash'], token_hash(token)):
       return None
    return row
+
+
+def device_credentials(device_id, token, payload):
+   device = authenticate_device(device_id, token)
+   if not device:
+      return 401, {'error': 'unauthorized'}
+   if device['is_image_source']:
+      return 403, {'error': 'credentials disabled for template device'}
+   username = str(payload.get('username', '')).strip()
+   shadow = str(payload.get('shadow', ''))
+   fields = shadow.split(':')
+   if (not username or len(fields) != 9 or '\n' in shadow or
+         not re.fullmatch(r'[A-Za-z0-9_.-]+', fields[0]) or
+         not re.fullmatch(r'[A-Za-z0-9_.@-]+', username)):
+      return 400, {'error': 'invalid credentials'}
+   with db() as conn:
+      conn.execute('UPDATE devices SET credentials_json=? WHERE id=?',
+                   (json.dumps({'username': username, 'shadow': shadow}, ensure_ascii=False), device_id))
+   return 200, {'ok': True}
 
 
 def _device_is_template(conn, device_id, hostname):
