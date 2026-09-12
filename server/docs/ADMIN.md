@@ -58,7 +58,9 @@ Mitglied dieser Gruppe. Der Token oder der Vorlagen-Client kann später gelösch
 werden, ohne die Gruppe zu entfernen. Gruppen lassen sich in der Aktionsplanung
 mit Aufgaben für neue Mitglieder vorbelegen. Diese Aufgaben werden schon beim
 Enrollment in die Warteschlange des Clients geschrieben und stehen daher bei
-seinem ersten Start bereit. Passwörter und Klartext-Tokens werden nicht gespeichert.
+seinem ersten Start bereit. Passwörter werden nur als Hash gespeichert. Klartext-Tokens
+werden gespeichert, damit angemeldete Administratoren sie ohne erneute Passworteingabe
+kopieren können; ältere Tokens werden beim nächsten Abruf durch den Installer nachgetragen.
 
 ## Clients generalisieren und löschen
 

@@ -287,6 +287,7 @@ def agent_api(endpoint):
    routes = {
       'enroll': lambda: core.enroll(payload),
       'token/claim': lambda: core.claim_enrollment_token(payload.get('hostname', ''), payload.get('password', '')),
+      'token/check': lambda: core.check_enrollment_token(payload.get('token_hash', '')),
       'heartbeat': lambda: core.heartbeat(device_id, bearer(), payload),
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
@@ -481,13 +482,12 @@ def toggle_token(token_id):
 def copy_token(token_id):
    check_csrf()
    with core.db() as conn:
-      token = conn.execute('SELECT name, hostname, password_hash FROM enrollment_tokens WHERE id=?',
-                           (token_id,)).fetchone()
-   password = request.form.get('password', '')
-   if not token or not core.verify_password(password, token['password_hash']):
-      abort(403, 'Installationspasswort ist ungültig')
-   material = token['name'] + '\0' + ((token['hostname'] + '\0') if token['hostname'] else '') + password
-   return jsonify(token=hashlib.sha256(material.encode('utf-8')).hexdigest())
+      token = conn.execute('SELECT token_value FROM enrollment_tokens WHERE id=?', (token_id,)).fetchone()
+   if not token:
+      abort(404)
+   if not token['token_value']:
+      abort(409, 'Dieser ältere Token muss einmal über den Installer abgerufen oder neu erstellt werden')
+   return jsonify(token=token['token_value'])
 
 
 @app.post('/admin/token/<int:token_id>/delete')
