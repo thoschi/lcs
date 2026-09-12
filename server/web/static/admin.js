@@ -5,6 +5,18 @@
       const example = capability.selectedOptions[0].dataset.parameters;
       if (example) parameters.value = JSON.stringify(JSON.parse(example), null, 2);
    });
+   document.querySelectorAll('.copy-button').forEach(button => button.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent.trim());
+      button.textContent = 'Kopiert';
+   }));
+   document.querySelectorAll('.stored-token-copy').forEach(button => button.addEventListener('click', async () => {
+      const body = new FormData();
+      body.append('csrf', button.dataset.csrf);
+      const response = await fetch(button.dataset.url, {method: 'POST', body});
+      if (!response.ok) return alert(await response.text() || 'Token konnte nicht kopiert werden.');
+      await navigator.clipboard.writeText((await response.json()).token);
+      button.textContent = 'Kopiert';
+   }));
    const table = document.querySelector('#client-table');
    if (!table) return;
    const body = table.tBodies[0];
@@ -47,18 +59,6 @@
    deviceType.addEventListener('change', applyView);
    group.addEventListener('change', applyView);
    document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => sortRows(button.dataset.sort)));
-   document.querySelectorAll('.copy-button').forEach(button => button.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent.trim());
-      button.textContent = 'Kopiert';
-   }));
-   document.querySelectorAll('.stored-token-copy').forEach(button => button.addEventListener('click', async () => {
-      const body = new FormData();
-      body.append('csrf', button.dataset.csrf);
-      const response = await fetch(button.dataset.url, {method: 'POST', body});
-      if (!response.ok) return alert(await response.text() || 'Token konnte nicht kopiert werden.');
-      await navigator.clipboard.writeText((await response.json()).token);
-      button.textContent = 'Kopiert';
-   }));
 
    const updateStatus = async () => {
       const indicator = document.querySelector('#client-refresh-state');
