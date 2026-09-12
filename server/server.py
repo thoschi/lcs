@@ -476,6 +476,20 @@ def toggle_token(token_id):
    return redirect(url_for('admin') + '#tokens')
 
 
+@app.post('/admin/token/<int:token_id>/copy')
+@admin_required
+def copy_token(token_id):
+   check_csrf()
+   with core.db() as conn:
+      token = conn.execute('SELECT name, hostname, password_hash FROM enrollment_tokens WHERE id=?',
+                           (token_id,)).fetchone()
+   password = request.form.get('password', '')
+   if not token or not core.verify_password(password, token['password_hash']):
+      abort(403, 'Installationspasswort ist ungültig')
+   material = token['name'] + '\0' + ((token['hostname'] + '\0') if token['hostname'] else '') + password
+   return jsonify(token=hashlib.sha256(material.encode('utf-8')).hexdigest())
+
+
 @app.post('/admin/token/<int:token_id>/delete')
 @admin_required
 def delete_token(token_id):
