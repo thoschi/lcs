@@ -3,3 +3,4 @@
 .editor-form{display:grid;gap:12px}.editor-form label{display:grid;gap:5px;color:var(--muted)}.code-editor{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;tab-size:3}.editor-actions,.token-actions{display:flex;align-items:center;gap:8px}.editor-actions .button{padding:9px 11px}
 .cap-actions{display:flex;align-items:center;gap:8px}.cap-actions>*{flex:1;text-align:center}.button.secondary{background:#fff;color:var(--ink);border-color:#cdd2d8}
 .preset{display:flex;align-items:center;justify-content:space-between;gap:8px}.preset button{padding:2px 7px}
+.template-tree{display:grid;gap:10px}.template-tree details{max-width:none;border:1px solid var(--line);border-radius:9px;padding:13px 15px}.template-tree summary{display:flex;align-items:center;gap:8px}.template-tree ul{margin:12px 0 0 14px;padding-left:22px;border-left:2px solid var(--line);list-style:none}.template-tree li{padding:8px 0}.template-tree li small{margin-left:12px}

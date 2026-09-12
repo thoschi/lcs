@@ -132,8 +132,19 @@ def bump_generation(payload=None):
 
 def load_manifest_for_device(device):
    payload = load_manifest()
-   selected = [cap for cap in payload.get('capabilities', [])
-               if core.capability_enabled_for_device(device['id'], cap['id'])]
+   selected = []
+   trigger_map = {
+      'startup': [{'type': 'startup'}],
+      'hourly': [{'type': 'interval', 'seconds': 3600}],
+      'daily': [{'type': 'daily', 'at': '00:00'}],
+   }
+   for capability in payload.get('capabilities', []):
+      assignment = core.capability_assignment_for_device(device['id'], capability['id'])
+      if not assignment['enabled']:
+         continue
+      capability = dict(capability)
+      capability['triggers'] = trigger_map.get(assignment.get('execution'), [])
+      selected.append(capability)
    return {'generation': payload.get('generation', 0), 'capabilities': selected}
 
 
@@ -200,14 +211,19 @@ def dashboard_data():
          item['hardware'] = json.loads(item.get('hardware_json') or '{}')
       except json.JSONDecodeError:
          item['hardware'] = {}
-   return devices, groups, assignments, tokens, actions
+   template_tree = []
+   for template in (item for item in devices if item['is_image_source']):
+      branch = dict(template)
+      branch['clients'] = [item for item in devices if item.get('template_device_id') == template['id'] and item['id'] != template['id']]
+      template_tree.append(branch)
+   return devices, groups, assignments, tokens, actions, template_tree
 
 
 def render_admin(new_token=None, editor=None):
-   devices, groups, assignments, tokens, actions = dashboard_data()
+   devices, groups, assignments, tokens, actions, template_tree = dashboard_data()
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=load_manifest(),
-                          now=core.now_ts(), new_token=new_token, editor=editor or {})
+                          now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree)
 
 
 @app.get('/health')
@@ -333,7 +349,7 @@ def admin():
 @app.get('/admin/client-status')
 @admin_required
 def client_status():
-   devices, _, _, _, _ = dashboard_data()
+   devices, _, _, _, _, _ = dashboard_data()
    return jsonify(devices=[{
       'id': item['id'],
       'online': item['online'],
@@ -440,7 +456,8 @@ def create_token():
          request.form.get('user_data', ''), request.form.get('require_local_username') == '1',
          request.form.get('password_username', ''))
       core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
-                                request.form.get('token_type', 'template') == 'template', settings=settings)
+                                request.form.get('token_type', 'template') == 'template', settings=settings,
+                                hostname=request.form.get('hostname', ''))
    except Exception as exc:
       flash(str(exc), 'error')
       return redirect(url_for('admin') + '#tokens')
@@ -550,10 +567,12 @@ def save_assignment():
    else:
       target_type, target_id = target.split(':', 1)
    with core.db() as conn:
-      conn.execute('''INSERT INTO capability_assignments(capability_id, target_type, target_id, enabled)
-         VALUES(?,?,?,?) ON CONFLICT(capability_id, target_type, target_id)
-         DO UPDATE SET enabled=excluded.enabled''',
-         (capability, target_type, target_id, int(request.form.get('enabled', '1'))))
+      conn.execute('''INSERT INTO capability_assignments(
+            capability_id, target_type, target_id, enabled, execution)
+         VALUES(?,?,?,?,?) ON CONFLICT(capability_id, target_type, target_id)
+         DO UPDATE SET enabled=excluded.enabled, execution=excluded.execution''',
+         (capability, target_type, target_id, int(request.form.get('enabled', '1')),
+          request.form.get('execution', 'manual')))
    bump_generation()
    flash('Capability-Zuordnung gespeichert.', 'success')
    return redirect(url_for('admin') + '#capabilities')

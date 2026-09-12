@@ -11,6 +11,7 @@
    const search = document.querySelector('#client-search');
    const platform = document.querySelector('#platform-filter');
    const deviceType = document.querySelector('#client-type-filter');
+   const group = document.querySelector('#group-filter');
    const count = document.querySelector('#client-result-count');
    let sortKey = 'hostname';
    let sortAscending = true;
@@ -22,7 +23,8 @@
       rows().forEach(row => {
          const show = (!query || row.dataset.search.includes(query)) &&
             (!platform.value || row.dataset.platform === platform.value) &&
-            (!deviceType.value || row.dataset.clientType === deviceType.value);
+            (!deviceType.value || row.dataset.clientType === deviceType.value) &&
+            (!group.value || row.dataset.groups.split(', ').includes(group.value));
          row.hidden = !show;
          if (show) visible += 1;
       });
@@ -43,6 +45,7 @@
    search.addEventListener('input', applyView);
    platform.addEventListener('change', applyView);
    deviceType.addEventListener('change', applyView);
+   group.addEventListener('change', applyView);
    document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => sortRows(button.dataset.sort)));
    document.querySelectorAll('.copy-button').forEach(button => button.addEventListener('click', async () => {
       await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent.trim());
@@ -57,7 +60,10 @@
          const data = await response.json();
          const currentIds = rows().map(row => row.dataset.clientId).sort().join(',');
          const newIds = data.devices.map(device => device.id).sort().join(',');
-         if (currentIds !== newIds) return location.reload();
+         if (currentIds !== newIds || data.devices.some(device => {
+            const row = body.querySelector(`[data-client-id="${CSS.escape(device.id)}"]`);
+            return row.dataset.clientType !== (device.is_image_source ? 'template' : 'client');
+         })) return location.reload();
          data.devices.forEach(device => {
             const row = body.querySelector(`[data-client-id="${CSS.escape(device.id)}"]`);
             const status = row.querySelector('[data-field="status"]');

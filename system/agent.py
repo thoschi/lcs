@@ -170,6 +170,8 @@ def handle_user_request(config, runtime, request):
    if operation == 'status':
       return {'ok': True, 'client_enabled': runtime.get('client_enabled', False),
               **initialization_status(config)}
+   if not runtime.get('client_enabled', False):
+      return {'ok': False, 'error': 'Der Nutzerclient ist für einen Musterclient deaktiviert.'}
    if operation == 'initialize':
       return initialize_user(config, str(request.get('username', '')).strip(), str(request.get('password', '')))
    if operation == 'capabilities':
@@ -339,6 +341,14 @@ def template_heartbeat(config, state):
       'agent_version': VERSION,
       'stack_generation': 0,
    })
+
+
+def apply_server_role(state, response, state_dir, user_runtime):
+   image_source = response.get('role') == 'template'
+   if state.get('image_source') != image_source:
+      state['image_source'] = image_source
+      save_state(state_dir, state)
+   user_runtime['client_enabled'] = bool(response.get('client_enabled', not image_source))
 
 
 def report_event(config, state, event_type, capability_id, payload, state_dir=None):
@@ -663,6 +673,8 @@ def run_forever(env_path=None, stop_requested=None):
                   continue
                if status != 200:
                   print('template heartbeat failed:', response, flush=True)
+               else:
+                  apply_server_role(state, response, paths['state_dir'], user_runtime)
             except Exception as exc:
                print('template heartbeat unavailable:', exc, flush=True)
             last_heartbeat = now
@@ -709,6 +721,8 @@ def run_forever(env_path=None, stop_requested=None):
                continue
             if status != 200:
                print('heartbeat failed:', response, flush=True)
+            else:
+               apply_server_role(state, response, paths['state_dir'], user_runtime)
          except Exception as exc:
             print('heartbeat unavailable:', exc, flush=True)
          last_heartbeat = now
