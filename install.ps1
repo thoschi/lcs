@@ -173,9 +173,11 @@ function Write-ClientEnv {
    $ca = Read-EnvValue $ClientEnv 'LCS_CA_FILE'
    $userData = Read-EnvValue $ClientEnv 'LCS_USER_DATA'
    $requireLocalUsername = Read-EnvValue $ClientEnv 'LCS_REQUIRE_LOCAL_USERNAME'
+   $defaultPassword = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
    $lines = @(
       "LCS_SERVER=$ServerUrl", 'LCS_HEARTBEAT_SECONDS=20', 'LCS_POLL_SECONDS=10', 'LCS_SYNC_SECONDS=60',
-      "LCS_STATE_ROOT=$StateRoot", "LCS_FEATURE_ROOT=$FeatureRoot", "LCS_TOKEN_FILE=$EnrollmentToken", 'LCS_CHANNEL=stable'
+      "LCS_STATE_ROOT=$StateRoot", "LCS_FEATURE_ROOT=$FeatureRoot", "LCS_TOKEN_FILE=$EnrollmentToken", 'LCS_CHANNEL=stable',
+      "LCS_DEFAULT_PASSWORD=$(if ($defaultPassword) { $defaultPassword } else { 'corvi' })"
    )
    if ($proxy) { $lines += "LCS_PROXY=$proxy" }
    if ($ca) { $lines += "LCS_CA_FILE=$ca" }

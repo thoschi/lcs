@@ -196,29 +196,25 @@ LCS_STATE_ROOT=/opt/mein-lcs-service/state \
 
 Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`, `LCS_STATE_ROOT`, `LCS_FEATURE_ROOT`, `LCS_SERVER_ENV`, `LCS_CLIENT_ENV` und `LCS_ENROLLMENT_TOKEN`.
 
-`LCS_USER_DATA` legt optional die Wurzel der Benutzerspeicher fest (Standard:
-`~/.config/lcs/data`, unter Windows `%APPDATA%\LCS\data`). Für jeden angemeldeten
-LCS-Benutzer entsteht darunter ein eigener Store. Der zuletzt gewählte Store wird
-beim Autostart ohne Rückfrage angemeldet; das Fenster bleibt dabei im Tray. Der
-Menüeintrag öffnet es ausdrücklich. Zugangsdaten werden im persönlichen Store
-gespeichert (unter POSIX mit Modus `0600`). Mit `LCS_REQUIRE_LOCAL_USERNAME=true`
-kann optional verlangt werden, dass der LCS-Benutzername dem lokalen Anmeldenamen
-entspricht; standardmäßig sind beide unabhängig. User-Capabilities erhalten den
-jeweiligen Store als `context["data_path"]`.
+`LCS_USER_DATA` bezeichnet genau einen Nutzerspeicher; es gibt keine Unterordner
+für verschiedene Benutzer. Standard ist `/home/nutzer/.config/lcs`. Bei der ersten
+Anmeldung fragt der Client Benutzername und Passwort mit Wiederholung ab. Der
+Systemdienst ersetzt unter Linux das über `LCS_DEFAULT_PASSWORD` konfigurierte
+Ausgangspasswort (Standard `corvi`), deaktiviert Autologin und speichert Benutzername
+und Shadow-Hash root-lesbar in `credentials.json`. Das Passwort selbst wird nie gespeichert.
 
-Benutzername und Passwort legen die Zugangsdaten dieses lokalen Stores fest; der Server
-gleicht sie nicht mit seiner Benutzertabelle ab. Beim erstmaligen Anlegen lässt der
-Client das Passwort deshalb zur Vermeidung einer Fehleingabe zweimal eingeben.
+Ein zufälliger Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
+(`/var/lib/lcs/system-initialized` beziehungsweise `%PROGRAMDATA%\LCS\system-initialized`).
+Fehlt die Systemkopie nach einer Synchronisierung, stellt Linux den gespeicherten
+Shadow-Hash ohne Rückfrage wieder her. Windows fragt in diesem Fall einmalig das
+Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der
+Benutzerclient kommuniziert ausschließlich über den lokalen Socket mit dem
+Systemdienst und nimmt niemals Kontakt zum Server auf.
 
-Capabilities können `startup`-, `interval`- oder tägliche `daily`-Trigger besitzen. Ohne Trigger
-sind sie manuell bzw. als einmalige Serveraktion nutzbar; abgearbeitete Aktionen
-werden aus der Queue gelöscht, ihr Ergebnis bleibt im Ereignisprotokoll. Bei
-`"requires_password": true` übergibt der Capability die Zugangsdaten des aktiven
-Stores. Die Bedingung
-`{"type": "password_unset"}` führt eine Aktion nur aus, wenn `passwd -S` sicher
-den Zustand `NP` (kein Passwort) meldet. Auch ein gesperrtes Passwort (`L`) gilt
-als vorhanden. Bei unbekanntem Zustand wird die Aktion bewusst
-übersprungen; es wird kein Testpasswort ausprobiert oder gespeichert.
+Capabilities können `startup`-, `interval`- oder tägliche `daily`-Trigger besitzen.
+System-Capabilities mit `"user_executable": true` erscheinen zusätzlich im Menü des
+Benutzerclients. Beim Anklicken führt weiterhin ausschließlich der privilegierte
+Systemdienst die lokal synchronisierte Aktion aus.
 
 ## Migration von v0.4
 
@@ -243,19 +239,9 @@ Bei einer normalen Workstation werden dagegen zwei Desktop-Integrationen erzeugt
 
 ## Erste Anmeldung und Aktionen
 
-Über **Vordefinierte Beispielaktionen installieren/aktualisieren** stellt der Server
-Aktionen zur lokalen Kontoinitialisierung, für WPA2-Enterprise und zur
-Remote-Dateibearbeitung bereit. Sie werden erst ausgeführt, nachdem sie unter
-**Capabilities & Zuordnung** einem Client, einer Gruppe oder allen Clients
-zugewiesen wurden.
-
-Ist `initialize-local-account` zugewiesen, plant der Server nach der ersten
-erfolgreichen Anmeldung im Nutzerclient automatisch eine privilegierte Aktion ein.
-Diese setzt das lokale Passwort und deaktiviert Autologin. Standardmäßig wird der
-LCS-Benutzername als lokaler Kontoname benutzt; im Image-Zugang kann mit
-`LCS_PASSWORD_USERNAME` ein abweichendes lokales Konto festgelegt werden. Nach der
-Rückmeldung entfernt der Server das Passwort aus den Aktionsparametern. Status und
-bereinigte Rückmeldung bleiben in der Aktionstabelle sichtbar.
+Die lokale Ersteinrichtung ist fester Bestandteil des Systemdienstes und benötigt
+weder Serverkontakt noch eine zugewiesene Capability. Das Zielkonto ist über
+`LCS_PASSWORD_USERNAME` konfigurierbar und heißt standardmäßig `nutzer`.
 
 Der **Aktionseditor** veröffentlicht Python-Aktionen direkt als Capability-Paket.
 Dadurch benötigt der Basisclient für neue Abläufe kein Update: Er lädt zugewiesene

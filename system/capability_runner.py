@@ -8,7 +8,9 @@ def main():
    if len(sys.argv) < 2:
       raise SystemExit(2)
    package = Path(sys.argv[1]).resolve()
-   params = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+   request = json.loads(sys.argv[2]) if len(sys.argv) > 2 else {}
+   params = request.get('parameters', {})
+   context = request.get('context', {})
    manifest = json.loads((package / 'manifest.json').read_text(encoding='utf-8'))
    entrypoint = manifest.get('entrypoint', 'action.py')
    script = (package / entrypoint).resolve()
@@ -21,6 +23,9 @@ def main():
       'parameters': params,
       'manifest': manifest,
       'package_path': str(package),
+      'data_path': context.get('data_path', ''),
+      'username': context.get('username', ''),
+      'user_home': context.get('user_home', ''),
    })
    print(json.dumps(result if result is not None else {'ok': True}, ensure_ascii=False))
 

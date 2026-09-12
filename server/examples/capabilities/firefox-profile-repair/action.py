@@ -1,9 +1,10 @@
 from pathlib import Path
 
 
-def run(_context):
+def run(context):
    removed = []
-   for profile in (Path.home() / '.mozilla' / 'firefox').glob('*'):
+   home = Path(context['user_home'])
+   for profile in (home / '.mozilla' / 'firefox').glob('*'):
       if not profile.is_dir():
          continue
       for name in ('lock', '.parentlock', 'parent.lock'):

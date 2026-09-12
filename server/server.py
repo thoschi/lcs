@@ -115,7 +115,7 @@ def publish_capability(source):
             package.write(path, path.relative_to(source).as_posix())
    item = {key: cap.get(key) for key in ('id', 'version', 'title', 'description', 'scope',
            'tags', 'triggers', 'timeout', 'requires_password', 'conditions', 'on_login_credentials',
-           'parameter_example') if cap.get(key) is not None}
+           'user_executable', 'parameter_example') if cap.get(key) is not None}
    item.update(filename=filename, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
    payload = load_manifest()
    payload['capabilities'] = [entry for entry in payload.get('capabilities', []) if entry.get('id') != capability_id]
@@ -272,38 +272,13 @@ def agent_api(endpoint):
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
       'device/self-delete': lambda: core.self_delete(device_id, bearer()),
-      'user/login': lambda: login_and_schedule(payload),
+      'user/login': lambda: core.user_login(payload),
       'user/heartbeat': lambda: core.user_heartbeat(bearer()),
       'user/action/result': lambda: core.user_action_result(bearer(), payload),
    }
    if endpoint not in routes:
       return jsonify(error='not found'), 404
    return api_result(routes[endpoint]())
-
-
-def login_and_schedule(payload):
-   status, response = core.user_login(payload)
-   if status != 200:
-      return status, response
-   device_id = str(payload.get('device_id', ''))
-   with core.db() as conn:
-      device_row = conn.execute('SELECT settings_json FROM devices WHERE id=?', (device_id,)).fetchone()
-   try:
-      settings = json.loads(device_row['settings_json'] or '{}') if device_row else {}
-   except json.JSONDecodeError:
-      settings = {}
-   for cap in load_manifest().get('capabilities', []):
-      if not cap.get('on_login_credentials') or not core.capability_enabled_for_device(device_id, cap['id']):
-         continue
-      with core.db() as conn:
-         existing = conn.execute('''SELECT 1 FROM actions WHERE device_id=? AND capability_id=?
-            AND status IN ('queued','running','done') LIMIT 1''', (device_id, cap['id'])).fetchone()
-      if not existing:
-         core.queue_action(device_id, cap['id'], {
-            'username': settings.get('LCS_PASSWORD_USERNAME') or payload.get('username', ''),
-            'password': payload.get('password', ''),
-         })
-   return status, response
 
 
 @app.get('/')
@@ -505,6 +480,7 @@ def edit_capability(capability_id):
    cap['title'] = request.form.get('title', '').strip() or capability_id
    cap['description'] = request.form.get('description', '').strip()
    cap['timeout'] = max(1, int(request.form.get('timeout', 120)))
+   cap['user_executable'] = request.form.get('user_executable') == '1'
    bump_generation(payload)
    flash('Capability aktualisiert.', 'success')
    return redirect(url_for('admin') + '#capabilities')
@@ -532,6 +508,7 @@ def capability_editor():
          'title': request.form.get('title', '').strip() or capability_id,
          'description': request.form.get('description', '').strip(),
          'scope': request.form.get('scope', 'system'),
+         'user_executable': request.form.get('user_executable') == '1',
          'timeout': max(1, int(request.form.get('timeout', '120'))),
          'entrypoint': 'action.py',
          'parameter_example': json.loads(request.form.get('parameter_example', '{}')),
