@@ -142,6 +142,16 @@ function Copy-Tree([string]$Source, [string]$Target) {
    Copy-Item -Path (Join-Path $Source '*') -Destination $Target -Recurse -Force
 }
 
+function Request-EnrollmentToken {
+   $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
+   $password = $credential.GetNetworkCredential().Password
+   $body = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
+   $response = Invoke-RestMethod -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json' -Body $body
+   Write-Utf8 $EnrollmentToken ($response.enrollment_token + "`r`n")
+   Protect-File $EnrollmentToken
+   Set-ServerSettings $response.settings
+}
+
 function Ensure-EnrollmentToken {
    $deviceState = Join-Path $StateRoot 'device.json'
    if (Test-Path $deviceState) {
@@ -151,6 +161,17 @@ function Ensure-EnrollmentToken {
    }
    if ((Test-Path $EnrollmentToken) -and (Get-Item $EnrollmentToken).Length -gt 0) {
       Protect-File $EnrollmentToken
+      if (-not $ServerUrl) { return }
+      $token = (Get-Content -Raw -LiteralPath $EnrollmentToken).Trim()
+      $bytes = [Text.Encoding]::UTF8.GetBytes($token)
+      $sha256 = [Security.Cryptography.SHA256]::Create()
+      try { $tokenHash = ([BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() }
+      finally { $sha256.Dispose() }
+      $body = @{ token_hash = $tokenHash } | ConvertTo-Json
+      $result = Invoke-RestMethod -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/check') -ContentType 'application/json' -Body $body
+      if ($result.valid) { return }
+      Write-Host 'Gespeicherter Imaging-Token ist nicht mehr gültig und wird ersetzt.'
+      Request-EnrollmentToken
       return
    }
    if ($TokenSource -and (Test-Path $TokenSource) -and (Get-Item $TokenSource).Length -gt 0) {
@@ -160,13 +181,7 @@ function Ensure-EnrollmentToken {
       return
    }
    if ($ServerUrl) {
-      $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
-      $password = $credential.GetNetworkCredential().Password
-      $body = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
-      $response = Invoke-RestMethod -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json' -Body $body
-      Write-Utf8 $EnrollmentToken ($response.enrollment_token + "`r`n")
-      Protect-File $EnrollmentToken
-      Set-ServerSettings $response.settings
+      Request-EnrollmentToken
       return
    }
    throw 'Für den Systemdienst fehlt der Enrollment-Token.'

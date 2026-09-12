@@ -154,6 +154,22 @@ with open(path, 'w', encoding='utf-8') as output:
 PY
 }
 
+download_enrollment_token() {
+   local password response token
+   read -r -s -p "Passwort für $(hostname): " password </dev/tty
+   echo
+   response="$(curl -fsS -H 'Content-Type: application/json' \
+      --data "$(python3 -c 'import json,sys; print(json.dumps({"hostname":sys.argv[1],"password":sys.argv[2]}))' "$(hostname)" "$password")" \
+      "$SERVER_URL/api/v1/token/claim")" || {
+      echo "Token konnte nicht vom Server abgerufen werden." >&2
+      exit 1
+   }
+   token="$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["enrollment_token"])')"
+   printf '%s\n' "$token" > "$LCS_ENROLLMENT_TOKEN"
+   chmod 600 "$LCS_ENROLLMENT_TOKEN"
+   apply_server_settings "$response"
+}
+
 ensure_enrollment_token() {
    if [ -s "$LCS_STATE_ROOT/device.json" ]; then
       # Nur die Image-Vorlage muss den Token für spätere Klone behalten.
@@ -164,6 +180,22 @@ ensure_enrollment_token() {
    fi
    if [ -s "$LCS_ENROLLMENT_TOKEN" ]; then
       chmod 600 "$LCS_ENROLLMENT_TOKEN"
+      if [ -z "$SERVER_URL" ]; then
+         return
+      fi
+      local current_hash response
+      current_hash="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read().strip()).hexdigest())' "$LCS_ENROLLMENT_TOKEN")"
+      response="$(curl -fsS -H 'Content-Type: application/json' \
+         --data "$(python3 -c 'import json,sys; print(json.dumps({"token_hash":sys.argv[1]}))' "$current_hash")" \
+         "$SERVER_URL/api/v1/token/check")" || {
+         echo "Token konnte nicht mit dem Server verglichen werden." >&2
+         exit 1
+      }
+      if printf '%s' "$response" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("valid") else 1)'; then
+         return
+      fi
+      echo "Gespeicherter Imaging-Token ist nicht mehr gültig und wird ersetzt."
+      download_enrollment_token
       return
    fi
 
@@ -176,19 +208,7 @@ ensure_enrollment_token() {
    fi
 
    if [ -n "$SERVER_URL" ]; then
-      local password response token
-      read -r -s -p "Passwort für $(hostname): " password </dev/tty
-      echo
-      response="$(curl -fsS -H 'Content-Type: application/json' \
-         --data "$(python3 -c 'import json,sys; print(json.dumps({"hostname":sys.argv[1],"password":sys.argv[2]}))' "$(hostname)" "$password")" \
-         "$SERVER_URL/api/v1/token/claim")" || {
-         echo "Token konnte nicht vom Server abgerufen werden." >&2
-         exit 1
-      }
-      token="$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["enrollment_token"])')"
-      printf '%s\n' "$token" > "$LCS_ENROLLMENT_TOKEN"
-      chmod 600 "$LCS_ENROLLMENT_TOKEN"
-      apply_server_settings "$response"
+      download_enrollment_token
       return
    fi
 

@@ -109,15 +109,15 @@ Vor der Registrierung liegt dieser Token unter Linux in
 `C:\ProgramData\LCS\enrollment.token`. Abweichende Pfade stehen als
 `LCS_TOKEN_FILE` in `client.env`. Die Datei bleibt nur auf der Image-Vorlage
 erhalten; ein regulärer Client löscht sie nach erfolgreicher Registrierung.
-Fehlt sie auf einer bereits registrierten Image-Vorlage, fragt der Installer
-auch beim Upgrade erneut nach dem Passwort des Image-Zugangs und lädt den Token
-vor dem Start des Systemdienstes wieder herunter.
+Beim Upgrade vergleicht der Installer den Hash der Datei mit dem Server. Fehlt
+der Token oder stimmt er nicht mehr überein, fragt der Installer nach dem Passwort
+des Image-Zugangs und ersetzt die Token-Datei vor dem Start des Systemdienstes.
 Linux-Images müssen `/sys/class/dmi/id/product_uuid` pro Zielgerät eindeutig
 bereitstellen oder vor dem Klonen eine Neuerzeugung von `/etc/machine-id`
 vorsehen, damit Vorlage und Klon nicht dieselbe Gerätekennung verwenden.
 
-Bereits installierte Rechner werden ohne Passwort und ohne Änderung von Token
-oder Geräteidentität aktualisiert:
+Bereits installierte Rechner werden ohne Änderung der Geräteidentität aktualisiert;
+nur bei einem ungültigen Imaging-Token ist das Passwort erneut erforderlich:
 
 ```bash
 ./install.sh upgrade workstation https://clients.corvi.schule

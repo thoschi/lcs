@@ -146,6 +146,7 @@ def init_db():
          name TEXT NOT NULL UNIQUE,
          token_hash TEXT NOT NULL UNIQUE,
          token_prefix TEXT NOT NULL,
+         token_value TEXT NOT NULL DEFAULT '',
          enabled INTEGER NOT NULL DEFAULT 1,
          created_at INTEGER NOT NULL,
          last_used_at INTEGER,
@@ -179,6 +180,8 @@ def init_db():
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN template_device_id TEXT NOT NULL DEFAULT ''")
       if 'group_name' not in token_columns:
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN group_name TEXT NOT NULL DEFAULT ''")
+      if 'token_value' not in token_columns:
+         conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN token_value TEXT NOT NULL DEFAULT ''")
       assignment_columns = {row['name'] for row in conn.execute('PRAGMA table_info(capability_assignments)').fetchall()}
       if 'execution' not in assignment_columns:
          conn.execute("ALTER TABLE capability_assignments ADD COLUMN execution TEXT NOT NULL DEFAULT 'manual'")
@@ -247,10 +250,11 @@ def add_enrollment_token(name, password='', template=True, token=None, settings=
                    (group_name, 'Automatisch für Enrollment-Zugang ' + name))
       conn.execute('''
          INSERT INTO enrollment_tokens(
-            name, token_hash, token_prefix, created_at, hostname, password_hash, settings_json, token_type, group_name
-         ) VALUES(?,?,?,?,?,?,?,?,?)
+            name, token_hash, token_prefix, created_at, hostname, password_hash, settings_json, token_type, group_name,
+            token_value
+         ) VALUES(?,?,?,?,?,?,?,?,?,?)
       ''', (name, token_hash(token), token[:8], now_ts(), hostname, password_hash(password),
-            json.dumps(settings or {}, ensure_ascii=False), 'template' if template else 'single', group_name))
+            json.dumps(settings or {}, ensure_ascii=False), 'template' if template else 'single', group_name, token))
    return token
 
 
@@ -266,11 +270,22 @@ def claim_enrollment_token(hostname, password):
    # Bestehende, hostnamegebundene Zugänge bleiben während der Migration nutzbar.
    material = row['name'] + '\0' + ((row['hostname'] + '\0') if row['hostname'] else '') + str(password)
    token = hashlib.sha256(material.encode('utf-8')).hexdigest()
+   if not row['token_value']:
+      with db() as conn:
+         conn.execute('UPDATE enrollment_tokens SET token_value=? WHERE id=?', (token, row['id']))
    try:
       settings = json.loads(row['settings_json'] or '{}')
    except (json.JSONDecodeError, TypeError):
       settings = {}
    return 200, {'enrollment_token': token, 'settings': settings}
+
+
+def check_enrollment_token(supplied_hash):
+   with db() as conn:
+      token = conn.execute(
+         'SELECT 1 FROM enrollment_tokens WHERE token_hash=? AND enabled=1',
+         (str(supplied_hash),)).fetchone()
+   return 200, {'valid': bool(token)}
 
 
 def create_reenrollment_token(device_id):
