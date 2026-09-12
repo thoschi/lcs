@@ -66,11 +66,12 @@ kopieren können; ältere Tokens werden beim nächsten Abruf durch den Installer
 
 **Identität zurücksetzen** (vormals „Generalisieren“) plant einen Reset als Systemaktion ein. Der Client bestätigt
 den Auftrag, entfernt danach Geräteidentität, Enrollment-Token, Scheduler-State
-und Capability-Cache und stoppt seinen Systemdienst. Mit der Bestätigung löscht
-der Server gleichzeitig Sessions, Aktionen, Ereignisse, Gruppen- und
-Capability-Zuordnungen sowie den Geräte-Datensatz. Bei einem Verbindungsabbruch
-wird die Bestätigung erneut versucht; eine anschließende `401` gilt als
-Bestätigung, dass der Server den Client bereits gelöscht hat.
+und Capability-Cache und stoppt seinen Systemdienst. Der Server sperrt die alte
+Geräteidentität, bewahrt aber Registrierung, Hostname und Zuordnungen auf. Beim
+erneuten Enrollment mit dem Zugang des zugehörigen Musterclients erkennt er den
+Rechner am Hostnamen und liefert seine bisherige Geräte-ID zurück. Bei einem Verbindungsabbruch wird die Bestätigung
+erneut versucht; eine anschließende `401` gilt als Bestätigung, dass die alte
+Identität bereits gesperrt wurde.
 
 **Sofort löschen** entfernt ausschließlich die Serverdaten. Diese Variante ist
 für dauerhaft verlorene oder bereits anderweitig generalisierte Geräte gedacht.

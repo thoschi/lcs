@@ -2,7 +2,6 @@ import hashlib
 import hmac
 import json
 import os
-import re
 import secrets
 import sqlite3
 import time
@@ -13,7 +12,6 @@ DB_PATH = Path(os.environ.get('LCS_SERVER_DB', str(BASE / 'data/lcs.sqlite3')))
 SESSION_TTL = int(os.environ.get('LCS_SESSION_TTL', '120'))
 ACTION_LEASE = int(os.environ.get('LCS_ACTION_LEASE', '180'))
 ACTION_PREFETCH = int(os.environ.get('LCS_ACTION_PREFETCH', '86400'))
-REENROLLMENT_TTL = int(os.environ.get('LCS_REENROLLMENT_TTL', str(30 * 86400)))
 
 
 def now_ts():
@@ -32,34 +30,44 @@ def _create_devices_table(conn, table='devices'):
          id TEXT PRIMARY KEY,
          token_hash TEXT NOT NULL,
          hostname TEXT NOT NULL,
-         machine_id TEXT NOT NULL UNIQUE,
          platform TEXT,
          agent_version TEXT,
          hardware_json TEXT,
          logged_in_users_json TEXT,
          stack_generation INTEGER NOT NULL DEFAULT 0,
          first_seen INTEGER NOT NULL,
-         last_seen INTEGER NOT NULL
+         last_seen INTEGER NOT NULL,
+         is_image_source INTEGER NOT NULL DEFAULT 0,
+         settings_json TEXT NOT NULL DEFAULT '{{}}',
+         template_device_id TEXT NOT NULL DEFAULT ''
       )
    ''')
 
 
-def _migrate_legacy_devices(conn):
+def _migrate_devices(conn):
    exists = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='devices'").fetchone()
    if not exists:
       return
    columns = {row['name'] for row in conn.execute('PRAGMA table_info(devices)').fetchall()}
-   if 'profile' not in columns and 'model_group' not in columns:
+   expected = {'id', 'token_hash', 'hostname', 'platform', 'agent_version', 'hardware_json',
+               'logged_in_users_json', 'stack_generation', 'first_seen', 'last_seen',
+               'is_image_source', 'settings_json', 'template_device_id'}
+   if columns == expected:
       return
    conn.execute('DROP TABLE IF EXISTS devices_v03')
    _create_devices_table(conn, 'devices_v03')
-   conn.execute('''
+   image_source = 'is_image_source' if 'is_image_source' in columns else '0'
+   settings = 'settings_json' if 'settings_json' in columns else "'{}'"
+   template = 'template_device_id' if 'template_device_id' in columns else "''"
+   conn.execute(f'''
       INSERT INTO devices_v03(
-         id, token_hash, hostname, machine_id, platform, agent_version,
-         hardware_json, logged_in_users_json, stack_generation, first_seen, last_seen
+         id, token_hash, hostname, platform, agent_version,
+         hardware_json, logged_in_users_json, stack_generation, first_seen, last_seen,
+         is_image_source, settings_json, template_device_id
       )
-      SELECT id, token_hash, hostname, machine_id, platform, agent_version,
-         hardware_json, logged_in_users_json, COALESCE(stack_generation, 0), first_seen, last_seen
+      SELECT id, token_hash, hostname, platform, agent_version,
+         hardware_json, logged_in_users_json, COALESCE(stack_generation, 0), first_seen, last_seen,
+         {image_source}, {settings}, {template}
       FROM devices
    ''')
    conn.execute('DROP TABLE devices')
@@ -70,7 +78,7 @@ def init_db():
    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
    with db() as conn:
       conn.execute('PRAGMA foreign_keys=OFF')
-      _migrate_legacy_devices(conn)
+      _migrate_devices(conn)
       _create_devices_table(conn)
       conn.executescript('''
       CREATE TABLE IF NOT EXISTS users (
@@ -135,13 +143,6 @@ def init_db():
          username TEXT NOT NULL DEFAULT '',
          created_at INTEGER NOT NULL
       );
-      CREATE TABLE IF NOT EXISTS enrollment_codes (
-         machine_id TEXT NOT NULL,
-         token_hash TEXT NOT NULL,
-         expires_at INTEGER NOT NULL,
-         created_at INTEGER NOT NULL,
-         PRIMARY KEY(machine_id, token_hash)
-      );
       CREATE TABLE IF NOT EXISTS enrollment_tokens (
          id INTEGER PRIMARY KEY AUTOINCREMENT,
          name TEXT NOT NULL UNIQUE,
@@ -163,8 +164,6 @@ def init_db():
          conn.execute("ALTER TABLE devices ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'")
       if 'template_device_id' not in columns:
          conn.execute("ALTER TABLE devices ADD COLUMN template_device_id TEXT NOT NULL DEFAULT ''")
-      if 'credentials_json' not in columns:
-         conn.execute("ALTER TABLE devices ADD COLUMN credentials_json TEXT NOT NULL DEFAULT '{}'")
       action_columns = {row['name'] for row in conn.execute('PRAGMA table_info(actions)').fetchall()}
       if 'scope' not in action_columns:
          conn.execute("ALTER TABLE actions ADD COLUMN scope TEXT NOT NULL DEFAULT 'system'")
@@ -296,48 +295,53 @@ def check_enrollment_token(supplied_hash, hostname=''):
 
 
 def create_reenrollment_token(device_id):
-   token = secrets.token_urlsafe(32)
    with db() as conn:
-      device = conn.execute('SELECT machine_id FROM devices WHERE id=?', (device_id,)).fetchone()
-      if not device:
-         raise ValueError('device not found: ' + device_id)
-      now = now_ts()
-      conn.execute('DELETE FROM enrollment_codes WHERE machine_id=? OR expires_at<?',
-                   (device['machine_id'], now))
-      conn.execute('''
-         INSERT INTO enrollment_codes(machine_id, token_hash, expires_at, created_at)
-         VALUES(?,?,?,?)
-      ''', (device['machine_id'], token_hash(token), now + REENROLLMENT_TTL, now))
-   return token
+      token = conn.execute('''
+         SELECT et.token_value FROM devices d
+         JOIN enrollment_tokens et ON et.template_device_id=d.template_device_id
+         WHERE d.id=? AND et.enabled=1 AND et.token_type='template'
+      ''', (device_id,)).fetchone()
+   if not token or not token['token_value']:
+      raise ValueError('no active template token for device: ' + device_id)
+   return token['token_value']
 
 
 def enroll(payload):
-   machine_id = str(payload.get('machine_id', '')).strip()
    hostname = str(payload.get('hostname', '')).strip()
    supplied_token = str(payload.get('enrollment_token', ''))
-   if not machine_id or not hostname:
-      return 400, {'error': 'machine_id and hostname required'}
+   if not hostname:
+      return 400, {'error': 'hostname required'}
 
-   one_time_hash = token_hash(supplied_token) if supplied_token else ''
+   supplied_hash = token_hash(supplied_token) if supplied_token else ''
    with db() as conn:
       reusable = conn.execute('''
          SELECT id, hostname, settings_json, token_type, template_device_id, group_name
          FROM enrollment_tokens WHERE token_hash=? AND enabled=1
-      ''', (one_time_hash,)).fetchone()
-      one_time = conn.execute('''
-         SELECT 1 FROM enrollment_codes
-         WHERE machine_id=? AND token_hash=? AND expires_at>=?
-      ''', (machine_id, one_time_hash, now_ts())).fetchone()
-      if not reusable and not one_time:
+      ''', (supplied_hash,)).fetchone()
+      if not reusable:
          return 403, {'error': 'invalid enrollment token'}
-      existing = conn.execute('SELECT id, credentials_json FROM devices WHERE machine_id=?', (machine_id,)).fetchone()
+      existing = None
+      if reusable['token_type'] == 'template' and reusable['template_device_id']:
+         existing = conn.execute('''
+         SELECT id, hostname, settings_json, template_device_id, is_image_source
+         FROM devices WHERE lower(hostname)=lower(?) AND
+            (id=? OR template_device_id=?)
+         ''', (hostname, reusable['template_device_id'], reusable['template_device_id'])).fetchone()
       device_id = existing['id'] if existing else secrets.token_hex(8)
+      registered_hostname = existing['hostname'] if existing else hostname
+      settings_json = (existing['settings_json'] if existing else
+                       reusable['settings_json'] if reusable else '{}')
+      template_device_id = (existing['template_device_id'] if existing else
+                            reusable['template_device_id'] if reusable else '')
+      image_source = bool(existing['is_image_source']) if existing else bool(
+         reusable and reusable['token_type'] == 'template' and
+         reusable['template_device_id'] in ('', device_id))
       device_token = secrets.token_urlsafe(32)
       now = now_ts()
       conn.execute('''
-         INSERT INTO devices(id, token_hash, hostname, machine_id, platform, agent_version, first_seen, last_seen, is_image_source, settings_json, template_device_id)
-         VALUES(?,?,?,?,?,?,?,?,?,?,?)
-         ON CONFLICT(machine_id) DO UPDATE SET
+         INSERT INTO devices(id, token_hash, hostname, platform, agent_version, first_seen, last_seen, is_image_source, settings_json, template_device_id)
+         VALUES(?,?,?,?,?,?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET
             token_hash=excluded.token_hash,
             hostname=excluded.hostname,
             platform=excluded.platform,
@@ -347,15 +351,10 @@ def enroll(payload):
             settings_json=excluded.settings_json,
             template_device_id=excluded.template_device_id
       ''', (
-         device_id, token_hash(device_token), hostname, machine_id,
-         payload.get('platform', ''), payload.get('agent_version', ''), now, now,
-         int(bool(reusable and reusable['token_type'] == 'template' and
-                  reusable['template_device_id'] in ('', device_id))),
-         reusable['settings_json'] if reusable else '{}',
-         reusable['template_device_id'] if reusable else ''
+         device_id, token_hash(device_token), registered_hostname, payload.get('platform', ''),
+         payload.get('agent_version', ''), now, now,
+         int(image_source), settings_json, template_device_id
       ))
-      if one_time:
-         conn.execute('DELETE FROM enrollment_codes WHERE machine_id=? AND token_hash=?', (machine_id, one_time_hash))
       if reusable:
          if reusable['token_type'] == 'single':
             _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
@@ -367,25 +366,16 @@ def enroll(payload):
             conn.execute('''UPDATE enrollment_tokens SET last_used_at=?, enrollment_count=enrollment_count+1
                WHERE id=?''', (now, reusable['id']))
             _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
-      conn.execute('DELETE FROM enrollment_codes WHERE expires_at<?', (now_ts(),))
-      log_event(conn, device_id, '', 'system', 'enroll', '', {'hostname': hostname})
+      log_event(conn, device_id, '', 'system', 'enroll', '', {'hostname': registered_hostname})
    settings = {}
-   if reusable:
+   if settings_json:
       try:
-         settings = json.loads(reusable['settings_json'] or '{}')
-      except (json.JSONDecodeError, TypeError):
-         pass
-   image_source = bool(reusable and reusable['token_type'] == 'template' and
-                       reusable['template_device_id'] in ('', device_id))
-   credentials = {}
-   if existing and not image_source:
-      try:
-         credentials = json.loads(existing['credentials_json'] or '{}')
+         settings = json.loads(settings_json)
       except (json.JSONDecodeError, TypeError):
          pass
    return 200, {'device_id': device_id, 'device_token': device_token,
                 'image_source': image_source, 'settings': settings,
-                'credentials': credentials}
+                'hostname': registered_hostname}
 
 
 def _apply_enrollment_group(conn, device_id, group_name, now):
@@ -405,25 +395,6 @@ def authenticate_device(device_id, token):
    if not row or not hmac.compare_digest(row['token_hash'], token_hash(token)):
       return None
    return row
-
-
-def device_credentials(device_id, token, payload):
-   device = authenticate_device(device_id, token)
-   if not device:
-      return 401, {'error': 'unauthorized'}
-   if device['is_image_source']:
-      return 403, {'error': 'credentials disabled for template device'}
-   username = str(payload.get('username', '')).strip()
-   shadow = str(payload.get('shadow', ''))
-   fields = shadow.split(':')
-   if (not username or len(fields) != 9 or '\n' in shadow or
-         not re.fullmatch(r'[A-Za-z0-9_.-]+', fields[0]) or
-         not re.fullmatch(r'[A-Za-z0-9_.@-]+', username)):
-      return 400, {'error': 'invalid credentials'}
-   with db() as conn:
-      conn.execute('UPDATE devices SET credentials_json=? WHERE id=?',
-                   (json.dumps({'username': username, 'shadow': shadow}, ensure_ascii=False), device_id))
-   return 200, {'ok': True}
 
 
 def _device_is_template(conn, device_id, hostname):
@@ -617,7 +588,9 @@ def action_result(device_id, token, payload):
                    (status, now_ts(), json.dumps(result, ensure_ascii=False), action_id))
       log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
       if row['capability_id'] == '__lcs_reset_device__' and status == 'done':
-         delete_device_data(conn, device['id'])
+         # Die Registrierung bleibt erhalten; nur die zurückgesetzte lokale
+         # Geräteidentität darf den Server nicht mehr verwenden.
+         conn.execute("UPDATE devices SET token_hash='' WHERE id=?", (device['id'],))
    return 200, {'ok': True}
 
 

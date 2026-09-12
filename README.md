@@ -114,10 +114,6 @@ der Token oder stimmt er nicht mehr überein, fragt der Installer nach dem Passw
 des Image-Zugangs und ersetzt die Token-Datei vor dem Start des Systemdienstes.
 Existiert für den Hostnamen kein Muster-Token, wird das Upgrade ohne Passwortabfrage
 fortgesetzt.
-Linux-Images müssen `/sys/class/dmi/id/product_uuid` pro Zielgerät eindeutig
-bereitstellen oder vor dem Klonen eine Neuerzeugung von `/etc/machine-id`
-vorsehen, damit Vorlage und Klon nicht dieselbe Gerätekennung verwenden.
-
 Bereits installierte Rechner werden ohne Änderung der Geräteidentität aktualisiert;
 nur bei einem ungültigen Imaging-Token ist das Passwort erneut erforderlich:
 
@@ -217,16 +213,15 @@ die Eingaben nur über den lokalen Unix-Socket an den als root laufenden Systemd
 Dieser setzt erst danach das Passwort mit `chpasswd`, setzt in GDM
 `AutomaticLoginEnable=False` und sichert anschließend Benutzername und die vollständige
 zugehörige Zeile aus `/etc/shadow` mit Modus 0600 in `credentials.json`. Das
-Klartextpasswort wird nicht gespeichert oder übertragen. Der Systemdienst hinterlegt
-Benutzername und Shadow-Zeile beim registrierten Rechner auf dem Managementserver,
-damit ein bereits bekannter Rechner sie nach dem Rücksetzen beim erneuten Enrollment
-automatisch wiederherstellen kann.
+Klartextpasswort wird weder gespeichert noch übertragen. Auch Benutzername und
+Shadow-Zeile verbleiben ausschließlich im lokalen Nutzerspeicher.
 
 Ein zufälliger Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
 (`/var/lib/lcs/system-initialized` beziehungsweise `%PROGRAMDATA%\LCS\system-initialized`).
-Fehlt die Systemkopie nach einer Synchronisierung, stellt Linux den gespeicherten
-Passworthash aus der lokalen oder beim Enrollment abgerufenen Shadow-Zeile ohne
-Rückfrage wieder her und deaktiviert den Autologin erneut. Windows fragt in diesem Fall einmalig das
+Fehlt die Systemkopie nach einem Zurücksetzen, verarbeitet der beim Login
+gestartete Nutzerclient die Daten aus dem erhaltenen Nutzerspeicher. Linux stellt den
+Passworthash aus der dort gesicherten Shadow-Zeile ohne Rückfrage wieder her und
+deaktiviert den Autologin erneut. Windows fragt in diesem Fall einmalig das
 Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der
 Benutzerclient kommuniziert ausschließlich über den lokalen Socket mit dem
 Systemdienst und nimmt niemals Kontakt zum Server auf.

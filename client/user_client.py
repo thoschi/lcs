@@ -3,6 +3,7 @@ import os
 import socket
 import sys
 import threading
+import time
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parents[1]
@@ -224,11 +225,19 @@ def run_gui(config, status):
 
 def main():
    config = load_env(config_path())
-   try:
-      status = request_service(config, 'status')
-      if not status.get('client_enabled'):
+   while True:
+      try:
+         status = request_service(config, 'status')
+      except Exception:
+         time.sleep(2)
+         continue
+      if status.get('client_enabled'):
+         break
+      if status.get('image_source'):
          print('Kein aktiver Nutzer-Client: Gerät ist noch nicht registriert oder dient als Image-Vorlage.')
          return 0
+      time.sleep(2)
+   try:
       if '--cli' in sys.argv:
          return run_cli(config)
       return run_gui(config, status)
