@@ -3,7 +3,6 @@ import getpass
 import hashlib
 import json
 import os
-import secrets
 import sqlite3
 import sys
 import time
@@ -20,7 +19,7 @@ if ENV_FILE.exists():
       key, value = line.split('=', 1)
       os.environ.setdefault(key.strip(), value.strip().strip('\"').strip("'"))
 
-from core import DB_PATH, SESSION_TTL, add_enrollment_token, delete_device_data, enrollment_settings, init_db, password_hash, queue_action, resolve_devices, token_hash
+from core import DB_PATH, SESSION_TTL, add_enrollment_token, create_reenrollment_token, delete_device_data, enrollment_settings, init_db, password_hash, queue_action, resolve_devices, token_hash
 
 MANIFEST = Path(os.environ.get('LCS_MANIFEST_FILE', str(BASE / 'bootstrap-manifest.json')))
 RELEASES = Path(os.environ.get('LCS_RELEASES_DIR', str(BASE / 'releases')))
@@ -335,15 +334,10 @@ def cmd_capability_unassign(args):
 def cmd_device_reset(args):
    with conn() as db:
       device = resolve_device_id(db, args.device)
-      machine = db.execute('SELECT machine_id FROM devices WHERE id=?', (device['id'],)).fetchone()
-      reenrollment_token = secrets.token_urlsafe(32)
-      db.execute('''
-         INSERT INTO enrollment_codes(machine_id, token_hash, expires_at, created_at)
-         VALUES(?,?,?,?)
-      ''', (machine['machine_id'], token_hash(reenrollment_token), int(time.time()) + 86400, int(time.time())))
+   reenrollment_token = create_reenrollment_token(device['id'])
    action_id = queue_action(device['id'], '__lcs_reset_device__', {'reenrollment_token': reenrollment_token}, int(time.time()))
    print('Reset an Client gesendet. Aktion:', action_id)
-   print('Ein einmaliger Re-Enrollment-Code ist 24 Stunden gültig.')
+   print('Der Zugang des zugehörigen Musterclients wird für die erneute Registrierung verwendet.')
    return 0
 
 
