@@ -179,6 +179,9 @@ def init_db():
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN template_device_id TEXT NOT NULL DEFAULT ''")
       if 'group_name' not in token_columns:
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN group_name TEXT NOT NULL DEFAULT ''")
+      assignment_columns = {row['name'] for row in conn.execute('PRAGMA table_info(capability_assignments)').fetchall()}
+      if 'execution' not in assignment_columns:
+         conn.execute("ALTER TABLE capability_assignments ADD COLUMN execution TEXT NOT NULL DEFAULT 'manual'")
       conn.execute('''UPDATE enrollment_tokens SET template_device_id=COALESCE((
          SELECT id FROM devices
          WHERE devices.is_image_source=1 AND lower(devices.hostname)=lower(enrollment_tokens.hostname)
@@ -227,13 +230,17 @@ def enrollment_settings(user_data='', require_local_username=False, password_use
    return settings
 
 
-def add_enrollment_token(name, password='', template=True, token=None, settings=None):
+def add_enrollment_token(name, password='', template=True, token=None, settings=None, hostname=''):
    name = str(name).strip()
    if not name:
       raise ValueError('Token-Name fehlt')
    if not password:
       raise ValueError('Passwort fehlt')
-   token = token or hashlib.sha256((name + '\0' + str(password)).encode('utf-8')).hexdigest()
+   hostname = str(hostname).strip().lower()
+   if '\n' in hostname or '\r' in hostname:
+      raise ValueError('Hostname darf keinen Zeilenumbruch enthalten')
+   material = name + '\0' + ((hostname + '\0') if hostname else '') + str(password)
+   token = token or hashlib.sha256(material.encode('utf-8')).hexdigest()
    group_name = 'Enrollment: ' + name
    with db() as conn:
       conn.execute('INSERT OR IGNORE INTO groups(name, description) VALUES(?,?)',
@@ -242,7 +249,7 @@ def add_enrollment_token(name, password='', template=True, token=None, settings=
          INSERT INTO enrollment_tokens(
             name, token_hash, token_prefix, created_at, hostname, password_hash, settings_json, token_type, group_name
          ) VALUES(?,?,?,?,?,?,?,?,?)
-      ''', (name, token_hash(token), token[:8], now_ts(), '', password_hash(password),
+      ''', (name, token_hash(token), token[:8], now_ts(), hostname, password_hash(password),
             json.dumps(settings or {}, ensure_ascii=False), 'template' if template else 'single', group_name))
    return token
 
@@ -371,6 +378,15 @@ def authenticate_device(device_id, token):
    return row
 
 
+def _device_is_template(conn, device_id, hostname):
+   return conn.execute('''
+      SELECT 1 FROM enrollment_tokens
+      WHERE enabled=1 AND token_type='template'
+         AND (template_device_id=? OR (hostname<>'' AND lower(hostname)=lower(?)))
+      LIMIT 1
+   ''', (device_id, hostname)).fetchone() is not None
+
+
 def heartbeat(device_id, token, payload):
    device = authenticate_device(device_id, token)
    if not device:
@@ -378,15 +394,20 @@ def heartbeat(device_id, token, payload):
    hardware = payload.get('hardware', {})
    hostname = str(hardware.get('hostname') or device['hostname'])
    with db() as conn:
+      conn.execute('''UPDATE enrollment_tokens SET template_device_id=?
+         WHERE enabled=1 AND token_type='template' AND template_device_id=''
+            AND hostname<>'' AND lower(hostname)=lower(?)''', (device['id'], hostname))
+      image_source = _device_is_template(conn, device['id'], hostname)
       conn.execute('''
          UPDATE devices SET last_seen=?, hostname=?, agent_version=?, hardware_json=?,
-            logged_in_users_json=?, stack_generation=? WHERE id=?
+            logged_in_users_json=?, stack_generation=?, is_image_source=? WHERE id=?
       ''', (
          now_ts(), hostname, payload.get('agent_version', ''),
          json.dumps(hardware, ensure_ascii=False),
          json.dumps(payload.get('logged_in_users', []), ensure_ascii=False),
-         int(payload.get('stack_generation', 0)), device['id']))
-   return 200, {'ok': True}
+         int(payload.get('stack_generation', 0)), int(image_source), device['id']))
+   return 200, {'ok': True, 'role': 'template' if image_source else 'client',
+                'client_enabled': not image_source}
 
 
 def groups_for_device(device_id):
@@ -395,32 +416,46 @@ def groups_for_device(device_id):
    return [row['group_name'] for row in rows]
 
 
-def capability_enabled_for_device(device_id, capability_id):
+def capability_assignment_for_device(device_id, capability_id):
    groups = groups_for_device(device_id)
    with db() as conn:
       direct = conn.execute('''
-         SELECT enabled FROM capability_assignments
+         SELECT enabled, execution FROM capability_assignments
          WHERE capability_id=? AND target_type='device' AND target_id=?
       ''', (capability_id, device_id)).fetchone()
       if direct is not None:
-         return bool(direct['enabled'])
+         return dict(direct)
+
+      device = conn.execute('SELECT template_device_id FROM devices WHERE id=?', (device_id,)).fetchone()
+      if device and device['template_device_id']:
+         template = conn.execute('''
+            SELECT enabled, execution FROM capability_assignments
+            WHERE capability_id=? AND target_type='template' AND target_id=?
+         ''', (capability_id, device['template_device_id'])).fetchone()
+         if template is not None:
+            return dict(template)
 
       if groups:
          placeholders = ','.join('?' for _ in groups)
          rows = conn.execute(f'''
-            SELECT enabled FROM capability_assignments
+            SELECT enabled, execution FROM capability_assignments
             WHERE capability_id=? AND target_type='group' AND target_id IN ({placeholders})
          ''', [capability_id, *groups]).fetchall()
          if any(not bool(row['enabled']) for row in rows):
-            return False
+            return {'enabled': 0, 'execution': 'manual'}
          if any(bool(row['enabled']) for row in rows):
-            return True
+            selected = next(row for row in rows if bool(row['enabled']))
+            return dict(selected)
 
       global_row = conn.execute('''
-         SELECT enabled FROM capability_assignments
+         SELECT enabled, execution FROM capability_assignments
          WHERE capability_id=? AND target_type='all' AND target_id='*'
       ''', (capability_id,)).fetchone()
-      return bool(global_row['enabled']) if global_row is not None else False
+      return dict(global_row) if global_row is not None else {'enabled': 0, 'execution': 'manual'}
+
+
+def capability_enabled_for_device(device_id, capability_id):
+   return bool(capability_assignment_for_device(device_id, capability_id)['enabled'])
 
 
 def user_login(payload):
@@ -430,9 +465,11 @@ def user_login(payload):
    if not username or not password or not device_id:
       return 400, {'error': 'missing credentials or device'}
    with db() as conn:
-      device = conn.execute('SELECT id FROM devices WHERE id=?', (device_id,)).fetchone()
+      device = conn.execute('SELECT id, is_image_source FROM devices WHERE id=?', (device_id,)).fetchone()
       if not device:
          return 403, {'error': 'device not registered'}
+      if device['is_image_source']:
+         return 403, {'error': 'user client disabled for template device'}
       user = conn.execute('SELECT full_name FROM users WHERE username=? AND enabled=1', (username,)).fetchone()
       session_token = secrets.token_urlsafe(32)
       now = now_ts()
