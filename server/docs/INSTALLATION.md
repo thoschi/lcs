@@ -55,10 +55,13 @@ Der Installer fragt ausschließlich das Passwort verdeckt ab und lädt den Token
 sowie die Einstellungen. Er trägt die Einstellungen automatisch in `client.env`
 ein. Der Dienst startet sofort; der Rechner erscheint als Image-Vorlage und
 bleibt im Ruhemodus, in dem er ausschließlich seinen Online-Status meldet. Der
-User-Client beendet sich auf der Vorlage ohne Anmeldung. Auf einem Klon erkennt
+User-Client wird weder auf der Vorlage noch auf den Klonen automatisch gestartet.
+Auf einem Klon erkennt
 der Agent den geänderten Hostnamen, verwirft die kopierte Identität, enrollt den
-Rechner separat und aktiviert erst dort System- und Benutzerfunktionen. Nur die
-Image-Vorlage behält die Token-Datei.
+Rechner separat und richtet das erhaltene Benutzerprofil einschließlich Passwort
+und deaktiviertem Autologin ohne Benutzerinteraktion erneut ein. Erst danach sind
+dort System- und Benutzerfunktionen aktiv. Nur die Image-Vorlage behält die
+Token-Datei.
 
 ## Client bleibt in der Verwaltung offline
 

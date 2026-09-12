@@ -218,14 +218,16 @@ Shadow-Zeile verbleiben ausschließlich im lokalen Nutzerspeicher.
 
 Ein zufälliger Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
 (`/var/lib/lcs/system-initialized` beziehungsweise `%PROGRAMDATA%\LCS\system-initialized`).
-Fehlt die Systemkopie nach einem Zurücksetzen, werden die Daten aus dem erhaltenen
-Nutzerspeicher erneut verarbeitet. Unter Linux stellt bereits der Systemdienst
-unmittelbar nach der erneuten Registrierung den
+Nach jeder erfolgreichen (Neu-)Registrierung verarbeitet der Systemdienst unter
+Linux die Daten aus dem erhaltenen Nutzerspeicher unabhängig vom kopierten Marker,
+stellt den
 Passworthash aus der dort gesicherten Shadow-Zeile ohne Rückfrage wieder her und
 deaktiviert den Autologin erneut. Windows fragt in diesem Fall einmalig das
 Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der
 Benutzerclient kommuniziert ausschließlich über den lokalen Socket mit dem
-Systemdienst und nimmt niemals Kontakt zum Server auf.
+Systemdienst und nimmt niemals Kontakt zum Server auf. Er wird nicht automatisch
+gestartet, sondern dient über den Menüeintrag ausschließlich als Oberfläche zum
+Auslösen der vom Systemdienst angebotenen Benutzeraktionen.
 
 Capabilities können `startup`-, `interval`- oder tägliche `daily`-Trigger besitzen.
 System-Capabilities mit `"user_executable": true` erscheinen zusätzlich im Menü des

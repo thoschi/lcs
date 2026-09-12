@@ -500,9 +500,8 @@ install_client() {
 
    write_client_env
 
-   # Autostart nach Benutzeranmeldung.
-   render_template "$SOURCE_ROOT/client/linux/lcs-client.desktop.in" "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
-   chmod 644 "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
+   # Der User-Client ist nur eine manuell aufrufbare Oberfläche.
+   rm -f "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
    rm -f "$LCS_AUTOSTART_ROOT/lmn-user-client.desktop"
 
    # Sichtbarer Starter im Anwendungsmenü.
@@ -510,7 +509,6 @@ install_client() {
    chmod 644 "$LCS_APPLICATIONS_ROOT/lcs-client.desktop"
 
    echo "LCS-User-Client installiert: $LCS_CLIENT_ROOT"
-   echo "Autostart: $LCS_AUTOSTART_ROOT/lcs-client.desktop"
    echo "Menüeintrag: $LCS_APPLICATIONS_ROOT/lcs-client.desktop"
 }
 

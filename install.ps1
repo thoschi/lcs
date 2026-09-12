@@ -241,10 +241,7 @@ function Install-UserClient {
    Write-ClientEnv
    $pythonw = Join-Path $ClientRoot 'venv\Scripts\pythonw.exe'
    $script = Join-Path $ClientRoot 'user_client.py'
-   $command = '"{0}" "{1}"' -f $pythonw, $script
-   $runKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
-   New-Item -Path $runKey -Force | Out-Null
-   New-ItemProperty -Path $runKey -Name 'LCS User Client' -Value $command -PropertyType String -Force | Out-Null
+   Remove-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LCS User Client' -ErrorAction SilentlyContinue
    $shortcutPath = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\LCS Client.lnk'
    $shell = New-Object -ComObject WScript.Shell
    $shortcut = $shell.CreateShortcut($shortcutPath)
@@ -253,7 +250,6 @@ function Install-UserClient {
    $shortcut.WorkingDirectory = $ClientRoot
    $shortcut.Save()
    Write-Host "LCS-User-Client installiert: $ClientRoot"
-   Write-Host 'Autostart: HKLM\Software\Microsoft\Windows\CurrentVersion\Run'
 }
 
 function Remove-UserClientIntegration {
