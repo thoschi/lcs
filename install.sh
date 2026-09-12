@@ -13,6 +13,9 @@ shift || true
 
 SERVER_URL=""
 TOKEN_SOURCE="${LCS_TOKEN_SOURCE:-}"
+INSTALL_PROXY="${LCS_PROXY:-}"
+CURL_PROXY_ARGS=()
+[ -n "$INSTALL_PROXY" ] && CURL_PROXY_ARGS=(--proxy "$INSTALL_PROXY")
 
 LCS_SERVER_ROOT="${LCS_SERVER_ROOT:-/opt/lcs-server}"
 LCS_CLIENT_ROOT="${LCS_CLIENT_ROOT:-/opt/lcs-client}"
@@ -60,6 +63,9 @@ Optionen:
   --token-file DATEI   Enrollment-Token für einen frischen Systemdienst
   --no-userclient      bei workstation/all nur den Systemdienst installieren;
                        keinen grafischen User-Client installieren
+
+Optionale Umgebung:
+  LCS_PROXY=URL        Proxy für Installation und späteren Systemdienst
 
 Standardziele:
   Server:       /opt/lcs-server
@@ -158,7 +164,7 @@ download_enrollment_token() {
    local password response token
    read -r -s -p "Passwort für $(hostname): " password </dev/tty
    echo
-   response="$(curl -fsS -H 'Content-Type: application/json' \
+   response="$(curl -fsS "${CURL_PROXY_ARGS[@]}" -H 'Content-Type: application/json' \
       --data "$(python3 -c 'import json,sys; print(json.dumps({"hostname":sys.argv[1],"password":sys.argv[2]}))' "$(hostname)" "$password")" \
       "$SERVER_URL/api/v1/token/claim")" || {
       echo "Token konnte nicht vom Server abgerufen werden." >&2
@@ -172,7 +178,7 @@ download_enrollment_token() {
 
 template_token_available() {
    local response
-   response="$(curl -fsS -H 'Content-Type: application/json' \
+   response="$(curl -fsS "${CURL_PROXY_ARGS[@]}" -H 'Content-Type: application/json' \
       --data "$(python3 -c 'import json,sys; print(json.dumps({"hostname":sys.argv[1]}))' "$(hostname)")" \
       "$SERVER_URL/api/v1/token/check")" || {
       echo "Muster-Token konnte nicht mit dem Server abgeglichen werden." >&2
@@ -196,7 +202,7 @@ ensure_enrollment_token() {
       fi
       local current_hash response
       current_hash="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read().strip()).hexdigest())' "$LCS_ENROLLMENT_TOKEN")"
-      response="$(curl -fsS -H 'Content-Type: application/json' \
+      response="$(curl -fsS "${CURL_PROXY_ARGS[@]}" -H 'Content-Type: application/json' \
          --data "$(python3 -c 'import json,sys; print(json.dumps({"token_hash":sys.argv[1]}))' "$current_hash")" \
          "$SERVER_URL/api/v1/token/check")" || {
          echo "Token konnte nicht mit dem Server verglichen werden." >&2
@@ -417,7 +423,8 @@ write_client_env() {
    mkdir -p "$LCS_SERVICE_ROOT"
 
    local proxy ca user_data password_username default_password
-   proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
+   proxy="$INSTALL_PROXY"
+   [ -z "$proxy" ] && proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
    ca="$(read_env_value "$LCS_CLIENT_ENV" LCS_CA_FILE)"
    user_data="$(read_env_value "$LCS_CLIENT_ENV" LCS_USER_DATA)"
    password_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_PASSWORD_USERNAME)"
