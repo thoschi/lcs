@@ -241,6 +241,9 @@ function Install-UserClient {
    Write-ClientEnv
    $pythonw = Join-Path $ClientRoot 'venv\Scripts\pythonw.exe'
    $script = Join-Path $ClientRoot 'user_client.py'
+   $icon = Join-Path $ClientRoot 'lcs-userclient.ico'
+   & $python -c 'from PIL import Image; import sys; Image.open(sys.argv[1]).save(sys.argv[2], sizes=[(256, 256)])' (Join-Path $ClientRoot 'lcs-userclient.png') $icon
+   if ($LASTEXITCODE) { throw 'Icon des LCS-User-Clients konnte nicht installiert werden.' }
    Remove-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LCS User Client' -ErrorAction SilentlyContinue
    $shortcutPath = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\LCS Client.lnk'
    $shell = New-Object -ComObject WScript.Shell
@@ -248,6 +251,7 @@ function Install-UserClient {
    $shortcut.TargetPath = $pythonw
    $shortcut.Arguments = '"{0}" --show' -f $script
    $shortcut.WorkingDirectory = $ClientRoot
+   $shortcut.IconLocation = $icon
    $shortcut.Save()
    Write-Host "LCS-User-Client installiert: $ClientRoot"
 }

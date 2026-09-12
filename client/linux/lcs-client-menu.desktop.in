@@ -3,6 +3,7 @@ Type=Application
 Name=LCS Client
 Comment=LCS Benutzerfunktionen öffnen
 Exec=env LCS_CONFIG=@CLIENT_ENV@ @CLIENT_ROOT@/venv/bin/python @CLIENT_ROOT@/user_client.py --show
+Icon=@CLIENT_ROOT@/lcs-userclient.png
 Terminal=false
 Categories=Utility;
 StartupNotify=true
