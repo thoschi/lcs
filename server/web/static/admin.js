@@ -10,6 +10,7 @@
    const body = table.tBodies[0];
    const search = document.querySelector('#client-search');
    const platform = document.querySelector('#platform-filter');
+   const deviceType = document.querySelector('#client-type-filter');
    const count = document.querySelector('#client-result-count');
    let sortKey = 'hostname';
    let sortAscending = true;
@@ -20,7 +21,8 @@
       let visible = 0;
       rows().forEach(row => {
          const show = (!query || row.dataset.search.includes(query)) &&
-            (!platform.value || row.dataset.platform === platform.value);
+            (!platform.value || row.dataset.platform === platform.value) &&
+            (!deviceType.value || row.dataset.clientType === deviceType.value);
          row.hidden = !show;
          if (show) visible += 1;
       });
@@ -40,6 +42,7 @@
 
    search.addEventListener('input', applyView);
    platform.addEventListener('change', applyView);
+   deviceType.addEventListener('change', applyView);
    document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => sortRows(button.dataset.sort)));
    document.querySelectorAll('.copy-button').forEach(button => button.addEventListener('click', async () => {
       await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent.trim());
@@ -66,7 +69,6 @@
             Object.assign(row.dataset, {status: device.online ? '1' : '0', hostname: device.hostname.toLowerCase(), platform: device.platform,
                groups: device.groups.toLowerCase(), agent: device.agent_version.toLowerCase(), last_seen: String(device.last_seen), search: JSON.stringify(device).toLowerCase()});
          });
-         document.querySelector('#online-count').textContent = data.devices.filter(device => device.online).length;
          indicator.textContent = `Zuletzt aktualisiert: ${new Date().toLocaleTimeString('de-DE')}`;
          applyView();
       } catch (error) {

@@ -185,8 +185,11 @@ def dashboard_data():
          group['presets'] = [dict(row) for row in presets if row['group_name'] == group['name']]
       assignments = [dict(row) for row in conn.execute(
          'SELECT * FROM capability_assignments ORDER BY capability_id, target_type, target_id').fetchall()]
-      tokens = [dict(row) for row in conn.execute(
-         'SELECT * FROM enrollment_tokens ORDER BY created_at DESC').fetchall()]
+      tokens = [dict(row) for row in conn.execute('''
+         SELECT et.*, d.hostname AS template_hostname
+         FROM enrollment_tokens et LEFT JOIN devices d ON d.id=et.template_device_id
+         ORDER BY et.created_at DESC
+      ''').fetchall()]
       actions = [dict(row) for row in conn.execute('''
          SELECT a.*, d.hostname FROM actions a JOIN devices d ON d.id=a.device_id
          ORDER BY a.id DESC LIMIT 40
