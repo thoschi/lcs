@@ -112,6 +112,8 @@ erhalten; ein regulärer Client löscht sie nach erfolgreicher Registrierung.
 Beim Upgrade vergleicht der Installer den Hash der Datei mit dem Server. Fehlt
 der Token oder stimmt er nicht mehr überein, fragt der Installer nach dem Passwort
 des Image-Zugangs und ersetzt die Token-Datei vor dem Start des Systemdienstes.
+Existiert für den Hostnamen kein Muster-Token, wird das Upgrade ohne Passwortabfrage
+fortgesetzt.
 Linux-Images müssen `/sys/class/dmi/id/product_uuid` pro Zielgerät eindeutig
 bereitstellen oder vor dem Klonen eine Neuerzeugung von `/etc/machine-id`
 vorsehen, damit Vorlage und Klon nicht dieselbe Gerätekennung verwenden.

@@ -280,12 +280,16 @@ def claim_enrollment_token(hostname, password):
    return 200, {'enrollment_token': token, 'settings': settings}
 
 
-def check_enrollment_token(supplied_hash):
+def check_enrollment_token(supplied_hash, hostname=''):
    with db() as conn:
       token = conn.execute(
          'SELECT 1 FROM enrollment_tokens WHERE token_hash=? AND enabled=1',
          (str(supplied_hash),)).fetchone()
-   return 200, {'valid': bool(token)}
+      template = conn.execute('''
+         SELECT 1 FROM enrollment_tokens
+         WHERE enabled=1 AND token_type='template' AND (hostname='' OR lower(hostname)=lower(?))
+      ''', (str(hostname).strip(),)).fetchone()
+   return 200, {'valid': bool(token), 'template_available': bool(template)}
 
 
 def create_reenrollment_token(device_id):

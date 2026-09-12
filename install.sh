@@ -170,6 +170,17 @@ download_enrollment_token() {
    apply_server_settings "$response"
 }
 
+template_token_available() {
+   local response
+   response="$(curl -fsS -H 'Content-Type: application/json' \
+      --data "$(python3 -c 'import json,sys; print(json.dumps({"hostname":sys.argv[1]}))' "$(hostname)")" \
+      "$SERVER_URL/api/v1/token/check")" || {
+      echo "Muster-Token konnte nicht mit dem Server abgeglichen werden." >&2
+      exit 1
+   }
+   printf '%s' "$response" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("template_available") else 1)'
+}
+
 ensure_enrollment_token() {
    if [ -s "$LCS_STATE_ROOT/device.json" ]; then
       # Nur die Image-Vorlage muss den Token für spätere Klone behalten.
@@ -194,6 +205,10 @@ ensure_enrollment_token() {
       if printf '%s' "$response" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin).get("valid") else 1)'; then
          return
       fi
+      if [ "$OPERATION" = "upgrade" ] && ! template_token_available; then
+         echo "Kein Muster-Token für $(hostname) vorhanden; gespeicherter Token bleibt unverändert."
+         return
+      fi
       echo "Gespeicherter Imaging-Token ist nicht mehr gültig und wird ersetzt."
       download_enrollment_token
       return
@@ -208,6 +223,10 @@ ensure_enrollment_token() {
    fi
 
    if [ -n "$SERVER_URL" ]; then
+      if [ "$OPERATION" = "upgrade" ] && ! template_token_available; then
+         echo "Kein Muster-Token für $(hostname) vorhanden; Upgrade wird ohne Token-Abfrage fortgesetzt."
+         return
+      fi
       download_enrollment_token
       return
    fi

@@ -287,7 +287,7 @@ def agent_api(endpoint):
    routes = {
       'enroll': lambda: core.enroll(payload),
       'token/claim': lambda: core.claim_enrollment_token(payload.get('hostname', ''), payload.get('password', '')),
-      'token/check': lambda: core.check_enrollment_token(payload.get('token_hash', '')),
+      'token/check': lambda: core.check_enrollment_token(payload.get('token_hash', ''), payload.get('hostname', '')),
       'heartbeat': lambda: core.heartbeat(device_id, bearer(), payload),
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
