@@ -198,15 +198,17 @@ Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`
 
 `LCS_USER_DATA` bezeichnet genau einen Nutzerspeicher; es gibt keine Unterordner
 für verschiedene Benutzer. Standard ist `/home/nutzer/.config/lcs`. Bei der ersten
-Anmeldung fragt der Client Benutzername und Passwort mit Wiederholung ab. Der
-Systemdienst ersetzt unter Linux das über `LCS_DEFAULT_PASSWORD` konfigurierte
-Ausgangspasswort (Standard `corvi`), deaktiviert Autologin und speichert Benutzername
-und Shadow-Hash root-lesbar in `credentials.json`. Das Passwort selbst wird nie gespeichert.
+Anmeldung fragt der Client Benutzername und Passwort mit Wiederholung ab. Er übergibt
+die Eingaben nur über den lokalen Unix-Socket an den als root laufenden Systemdienst.
+Dieser setzt erst danach das Passwort mit `chpasswd`, setzt in GDM
+`AutomaticLoginEnable=False` und sichert anschließend Benutzername und die vollständige
+zugehörige Zeile aus `/etc/shadow` mit Modus 0600 in `credentials.json`. Das
+Klartextpasswort wird weder gespeichert noch an den Managementserver übertragen.
 
 Ein zufälliger Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
 (`/var/lib/lcs/system-initialized` beziehungsweise `%PROGRAMDATA%\LCS\system-initialized`).
 Fehlt die Systemkopie nach einer Synchronisierung, stellt Linux den gespeicherten
-Shadow-Hash ohne Rückfrage wieder her. Windows fragt in diesem Fall einmalig das
+Passworthash aus der gesicherten Shadow-Zeile ohne Rückfrage wieder her. Windows fragt in diesem Fall einmalig das
 Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der
 Benutzerclient kommuniziert ausschließlich über den lokalen Socket mit dem
 Systemdienst und nimmt niemals Kontakt zum Server auf.
