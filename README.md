@@ -187,11 +187,26 @@ austauschen kann.
 
 ## Prüfungsproxy
 
-In `/opt/lcs-service/client.env` kann ergänzt werden:
+Normalerweise wird kein Proxy benötigt. Falls die Verbindung zum LCS-Server
+über einen Proxy laufen muss, kann er bereits beim Installationsaufruf über
+`LCS_PROXY` gesetzt werden:
+
+```bash
+LCS_PROXY=http://127.0.0.1:3128 \
+./install.sh install workstation https://clients.corvi.schule
+```
+
+Der Installer verwendet den Proxy selbst, etwa zum Abruf des Enrollment-Tokens,
+und schreibt ihn für den Systemdienst nach `/opt/lcs-service/client.env`:
 
 ```ini
 LCS_PROXY=http://127.0.0.1:3128
 ```
+
+Ohne gesetzte Umgebungsvariable bleibt ein bereits vorhandener Eintrag bei einem
+Upgrade erhalten. Unter Windows wird `LCS_PROXY` entsprechend vor dem Aufruf von
+`install.ps1` gesetzt, zum Beispiel mit
+`$env:LCS_PROXY = 'http://127.0.0.1:3128'`.
 
 ## Pfade überschreiben
 

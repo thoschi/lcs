@@ -23,6 +23,8 @@ if ($Mode -in @('install', 'upgrade', 'uninstall')) {
 }
 if (($Operation -eq 'uninstall') -and -not $Mode) { $Mode = 'all' }
 $TokenSource = if ($TokenFile) { $TokenFile } else { $env:LCS_TOKEN_SOURCE }
+$InstallProxy = $env:LCS_PROXY
+$ProxyParameters = if ($InstallProxy) { @{ Proxy = $InstallProxy } } else { @{} }
 
 $ServerRoot = if ($env:LCS_SERVER_ROOT) { $env:LCS_SERVER_ROOT } else { Join-Path $env:ProgramFiles 'LCS\Server' }
 $ServiceRoot = if ($env:LCS_SERVICE_ROOT) { $env:LCS_SERVICE_ROOT } else { Join-Path $env:ProgramFiles 'LCS\Service' }
@@ -47,6 +49,7 @@ Aufruf:
 
 Modi und Optionen entsprechen install.sh. Alle Laufzeitpfade können über
 LCS_*_ROOT bzw. LCS_*_ENV überschrieben werden.
+Optional verwendet LCS_PROXY einen Proxy für Installation und Systemdienst.
 "@
 }
 
@@ -146,7 +149,7 @@ function Request-EnrollmentToken {
    $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
    $password = $credential.GetNetworkCredential().Password
    $body = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
-   $response = Invoke-RestMethod -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json' -Body $body
+   $response = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json' -Body $body
    Write-Utf8 $EnrollmentToken ($response.enrollment_token + "`r`n")
    Protect-File $EnrollmentToken
    Set-ServerSettings $response.settings
@@ -168,7 +171,7 @@ function Ensure-EnrollmentToken {
       try { $tokenHash = ([BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() }
       finally { $sha256.Dispose() }
       $body = @{ token_hash = $tokenHash } | ConvertTo-Json
-      $result = Invoke-RestMethod -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/check') -ContentType 'application/json' -Body $body
+      $result = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/check') -ContentType 'application/json' -Body $body
       if ($result.valid) { return }
       Write-Host 'Gespeicherter Imaging-Token ist nicht mehr gültig und wird ersetzt.'
       Request-EnrollmentToken
@@ -189,7 +192,7 @@ function Ensure-EnrollmentToken {
 
 function Write-ClientEnv {
    Require-ServerUrl
-   $proxy = Read-EnvValue $ClientEnv 'LCS_PROXY'
+   $proxy = if ($InstallProxy) { $InstallProxy } else { Read-EnvValue $ClientEnv 'LCS_PROXY' }
    $ca = Read-EnvValue $ClientEnv 'LCS_CA_FILE'
    $userData = Read-EnvValue $ClientEnv 'LCS_USER_DATA'
    $requireLocalUsername = Read-EnvValue $ClientEnv 'LCS_REQUIRE_LOCAL_USERNAME'

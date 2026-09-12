@@ -118,11 +118,24 @@ Ein neuer Bootstrap-Token ist nicht nötig, solange `/opt/lcs-service/state/devi
 
 ## Prüfungsproxy
 
-In `/opt/lcs-service/client.env`:
+Ein Proxy ist für die übliche Installation nicht erforderlich. Bei Bedarf wird
+er dem Installer als Umgebungsvariable übergeben:
+
+```bash
+LCS_PROXY=http://127.0.0.1:3128 \
+./install.sh install workstation https://clients.corvi.schule
+```
+
+Der Installer nutzt ihn bereits für seine Verbindung zum LCS-Server und trägt
+ihn anschließend in `/opt/lcs-service/client.env` ein:
 
 ```ini
 LCS_PROXY=http://127.0.0.1:3128
 ```
+
+Ist `LCS_PROXY` beim Upgrade nicht gesetzt, bleibt ein vorhandener Eintrag
+erhalten. In PowerShell kann die Variable vor `install.ps1` als
+`$env:LCS_PROXY = 'http://127.0.0.1:3128'` gesetzt werden.
 
 ## Eigene Pfade
 
