@@ -104,6 +104,18 @@ speichert den Hostnamen in seiner Identität; ein Klon mit anderem Hostnamen
 verwirft die mitkopierte Geräteidentität automatisch und registriert sich mit
 dem Token als eigener Client.
 
+Vor der Registrierung liegt dieser Token unter Linux in
+`/opt/lcs-service/enrollment.token`, unter Windows in
+`C:\ProgramData\LCS\enrollment.token`. Abweichende Pfade stehen als
+`LCS_TOKEN_FILE` in `client.env`. Die Datei bleibt nur auf der Image-Vorlage
+erhalten; ein regulärer Client löscht sie nach erfolgreicher Registrierung.
+Fehlt sie auf einer bereits registrierten Image-Vorlage, fragt der Installer
+auch beim Upgrade erneut nach dem Passwort des Image-Zugangs und lädt den Token
+vor dem Start des Systemdienstes wieder herunter.
+Linux-Images müssen `/sys/class/dmi/id/product_uuid` pro Zielgerät eindeutig
+bereitstellen oder vor dem Klonen eine Neuerzeugung von `/etc/machine-id`
+vorsehen, damit Vorlage und Klon nicht dieselbe Gerätekennung verwenden.
+
 Bereits installierte Rechner werden ohne Passwort und ohne Änderung von Token
 oder Geräteidentität aktualisiert:
 

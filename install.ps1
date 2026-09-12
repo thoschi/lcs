@@ -143,7 +143,12 @@ function Copy-Tree([string]$Source, [string]$Target) {
 }
 
 function Ensure-EnrollmentToken {
-   if (Test-Path (Join-Path $StateRoot 'device.json')) { return }
+   $deviceState = Join-Path $StateRoot 'device.json'
+   if (Test-Path $deviceState) {
+      try { $isImageSource = [bool]((Get-Content -Raw -LiteralPath $deviceState | ConvertFrom-Json).image_source) }
+      catch { $isImageSource = $false }
+      if (-not $isImageSource) { return }
+   }
    if ((Test-Path $EnrollmentToken) -and (Get-Item $EnrollmentToken).Length -gt 0) {
       Protect-File $EnrollmentToken
       return
@@ -154,7 +159,7 @@ function Ensure-EnrollmentToken {
       Protect-File $EnrollmentToken
       return
    }
-   if (($Operation -eq 'install') -and $ServerUrl) {
+   if ($ServerUrl) {
       $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
       $password = $credential.GetNetworkCredential().Password
       $body = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
@@ -164,7 +169,7 @@ function Ensure-EnrollmentToken {
       Set-ServerSettings $response.settings
       return
    }
-   throw 'Für einen frischen Systemdienst fehlt der Enrollment-Token.'
+   throw 'Für den Systemdienst fehlt der Enrollment-Token.'
 }
 
 function Write-ClientEnv {

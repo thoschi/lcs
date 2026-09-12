@@ -155,9 +155,12 @@ PY
 }
 
 ensure_enrollment_token() {
-   # Bereits enrollte Geräte benötigen bei einem Update keinen Bootstrap-Token.
    if [ -s "$LCS_STATE_ROOT/device.json" ]; then
-      return
+      # Nur die Image-Vorlage muss den Token für spätere Klone behalten.
+      if ! python3 -c 'import json,sys; sys.exit(0 if json.load(open(sys.argv[1], encoding="utf-8")).get("image_source") else 1)' \
+         "$LCS_STATE_ROOT/device.json" 2>/dev/null; then
+         return
+      fi
    fi
    if [ -s "$LCS_ENROLLMENT_TOKEN" ]; then
       chmod 600 "$LCS_ENROLLMENT_TOKEN"
@@ -172,7 +175,7 @@ ensure_enrollment_token() {
       exit 1
    fi
 
-   if [ "$OPERATION" = "install" ] && [ -n "$SERVER_URL" ]; then
+   if [ -n "$SERVER_URL" ]; then
       local password response token
       read -r -s -p "Passwort für $(hostname): " password </dev/tty
       echo
@@ -201,7 +204,7 @@ ensure_enrollment_token() {
       fi
    done
 
-   echo "Für einen frischen Systemdienst fehlt der Enrollment-Token." >&2
+   echo "Für den Systemdienst fehlt der Enrollment-Token." >&2
    echo "Aufruf z. B.: $0 workstation $SERVER_URL --token-file /pfad/server.token" >&2
    exit 1
 }
