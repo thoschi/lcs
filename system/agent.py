@@ -139,14 +139,14 @@ def disable_autologin():
    log('Autologin wurde deaktiviert', configurations=changed)
 
 
-def initialize_user(config, username='', password=''):
+def initialize_user(config, username='', password='', force=False):
    profile_path = user_profile_path(config)
    local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
    status = initialization_status(config)
    profile = load_json(profile_path, {})
    log('Benutzereinrichtung geprüft', initialization_required=status['initialization_required'],
        profile_exists=status['profile_exists'], local_username=local_username)
-   if not status['initialization_required']:
+   if not force and not status['initialization_required']:
       log('Benutzereinrichtung bereits abgeschlossen')
       return {'ok': True, 'username': profile.get('username', '')}
    if status['profile_exists'] and os.name != 'nt':
@@ -342,9 +342,9 @@ def enroll(config, state_dir):
        image_source=state['image_source'])
    if not state['image_source']:
       user_status = initialization_status(config)
-      if user_status['profile_exists'] and user_status['initialization_required'] and os.name != 'nt':
+      if user_status['profile_exists'] and os.name != 'nt':
          log('Sofortige Benutzereinrichtung nach Registrierung gestartet')
-         result = initialize_user(config)
+         result = initialize_user(config, force=True)
          if not result.get('ok'):
             raise RuntimeError('Automatic user initialization failed: ' + result.get('error', 'unknown error'))
       else:
