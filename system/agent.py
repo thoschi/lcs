@@ -634,10 +634,6 @@ def run_forever(env_path=None, stop_requested=None):
    poll_interval = int(config.get('LCS_POLL_SECONDS', '10'))
    sync_interval = int(config.get('LCS_SYNC_SECONDS', '60'))
    state = load_state(paths['state_dir'])
-   current_hostname = hardware_info()['hostname']
-   if state.get('hostname') and state['hostname'].lower() != current_hostname.lower():
-      # A clone must never reuse the image source's device credentials.
-      state = {}
    if state.get('device_id'):
       save_json(Path(paths['state_dir']) / 'device-public.json', {
          'device_id': state['device_id'],
@@ -655,6 +651,14 @@ def run_forever(env_path=None, stop_requested=None):
       now = time.time()
       if stop_requested and stop_requested():
          return
+
+      current_hostname = socket.gethostname()
+      if state.get('hostname') and state['hostname'].lower() != current_hostname.lower():
+         # Hostnamen können erst nach dem Start des geklonten Systems gesetzt werden.
+         state = {}
+         user_runtime['client_enabled'] = False
+         for filename in ('device.json', 'device-public.json'):
+            (Path(paths['state_dir']) / filename).unlink(missing_ok=True)
 
       if not state.get('device_id') or not state.get('device_token'):
          try:
