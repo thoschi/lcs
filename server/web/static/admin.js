@@ -51,6 +51,17 @@
       await navigator.clipboard.writeText(document.getElementById(button.dataset.copy).textContent.trim());
       button.textContent = 'Kopiert';
    }));
+   document.querySelectorAll('.stored-token-copy').forEach(button => button.addEventListener('click', async () => {
+      const password = prompt('Installationspasswort für diesen Token:');
+      if (password === null) return;
+      const body = new FormData();
+      body.append('csrf', button.dataset.csrf);
+      body.append('password', password);
+      const response = await fetch(button.dataset.url, {method: 'POST', body});
+      if (!response.ok) return alert('Token konnte nicht kopiert werden.');
+      await navigator.clipboard.writeText((await response.json()).token);
+      button.textContent = 'Kopiert';
+   }));
 
    const updateStatus = async () => {
       const indicator = document.querySelector('#client-refresh-state');

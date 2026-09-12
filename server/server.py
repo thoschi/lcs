@@ -455,14 +455,14 @@ def create_token():
       settings = core.enrollment_settings(
          request.form.get('user_data', ''), request.form.get('require_local_username') == '1',
          request.form.get('password_username', ''))
-      core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
-                                request.form.get('token_type', 'template') == 'template', settings=settings,
-                                hostname=request.form.get('hostname', ''))
+      token = core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
+                                        request.form.get('token_type', 'template') == 'template', settings=settings,
+                                        hostname=request.form.get('hostname', ''))
    except Exception as exc:
       flash(str(exc), 'error')
       return redirect(url_for('admin') + '#tokens')
    flash('Vorläufiger Zugang erzeugt. Er wird beim ersten Enrollment aktiviert.', 'success')
-   return redirect(url_for('admin') + '#tokens')
+   return render_admin(new_token=token)
 
 
 @app.post('/admin/token/<int:token_id>/toggle')
@@ -474,6 +474,20 @@ def toggle_token(token_id):
                    (token_id,))
    flash('Token-Status geändert.', 'success')
    return redirect(url_for('admin') + '#tokens')
+
+
+@app.post('/admin/token/<int:token_id>/copy')
+@admin_required
+def copy_token(token_id):
+   check_csrf()
+   with core.db() as conn:
+      token = conn.execute('SELECT name, hostname, password_hash FROM enrollment_tokens WHERE id=?',
+                           (token_id,)).fetchone()
+   password = request.form.get('password', '')
+   if not token or not core.verify_password(password, token['password_hash']):
+      abort(403, 'Installationspasswort ist ungültig')
+   material = token['name'] + '\0' + ((token['hostname'] + '\0') if token['hostname'] else '') + password
+   return jsonify(token=hashlib.sha256(material.encode('utf-8')).hexdigest())
 
 
 @app.post('/admin/token/<int:token_id>/delete')
