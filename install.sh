@@ -374,11 +374,12 @@ write_client_env() {
    ensure_server_url
    mkdir -p "$LCS_SERVICE_ROOT"
 
-   local proxy ca user_data require_local_username
+   local proxy ca user_data password_username default_password
    proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
    ca="$(read_env_value "$LCS_CLIENT_ENV" LCS_CA_FILE)"
    user_data="$(read_env_value "$LCS_CLIENT_ENV" LCS_USER_DATA)"
-   require_local_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_REQUIRE_LOCAL_USERNAME)"
+   password_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_PASSWORD_USERNAME)"
+   default_password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
    if [ -z "$proxy" ]; then
       proxy="$(read_env_value /etc/lcs/client.env LCS_PROXY)"
       [ -z "$proxy" ] && proxy="$(read_env_value /etc/lmn-client/client.env LMN_PROXY)"
@@ -397,11 +398,12 @@ LCS_STATE_ROOT=$LCS_STATE_ROOT
 LCS_FEATURE_ROOT=$LCS_FEATURE_ROOT
 LCS_TOKEN_FILE=$LCS_ENROLLMENT_TOKEN
 LCS_CHANNEL=stable
+LCS_DEFAULT_PASSWORD=${default_password:-corvi}
 EOF2
    [ -n "$proxy" ] && printf 'LCS_PROXY=%s\n' "$proxy" >> "$LCS_CLIENT_ENV"
    [ -n "$ca" ] && printf 'LCS_CA_FILE=%s\n' "$ca" >> "$LCS_CLIENT_ENV"
    [ -n "$user_data" ] && printf 'LCS_USER_DATA=%s\n' "$user_data" >> "$LCS_CLIENT_ENV"
-   [ -n "$require_local_username" ] && printf 'LCS_REQUIRE_LOCAL_USERNAME=%s\n' "$require_local_username" >> "$LCS_CLIENT_ENV"
+   [ -n "$password_username" ] && printf 'LCS_PASSWORD_USERNAME=%s\n' "$password_username" >> "$LCS_CLIENT_ENV"
    chmod 644 "$LCS_CLIENT_ENV"
    chown root:root "$LCS_CLIENT_ENV"
 }

@@ -1,10 +1,10 @@
 {
   "id": "firefox-profile-repair",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "title": "Firefox-Profil entsperren",
   "description": "Wegwerfaktion: entfernt verwaiste Firefox-Sperrdateien des angemeldeten Benutzers.",
-  "scope": "user",
-  "tags": ["user"],
+  "scope": "system",
+  "user_executable": true,
   "timeout": 30,
   "triggers": [],
   "entrypoint": "action.py"

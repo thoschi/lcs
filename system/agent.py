@@ -1,9 +1,13 @@
 import json
 import os
+import re
+import socket
+import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -44,6 +48,182 @@ def runtime_paths(config):
       'feature_root': config.get('LCS_FEATURE_ROOT', defaults['feature_root']),
       'token': config.get('LCS_TOKEN_FILE', defaults['token']),
    }
+
+
+def user_profile_path(config):
+   local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+   default = (str(Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username / 'AppData' / 'Roaming' / 'LCS')
+              if os.name == 'nt' else '/home/%s/.config/lcs' % local_username)
+   root = Path(config.get('LCS_USER_DATA', default)).expanduser()
+   return root / 'credentials.json'
+
+
+def system_marker_path(config):
+   default = (str(Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'LCS' / 'system-initialized')
+              if os.name == 'nt' else '/var/lib/lcs/system-initialized')
+   return Path(config.get('LCS_SYSTEM_MARKER', default))
+
+
+def initialization_status(config):
+   profile = load_json(user_profile_path(config), {})
+   try:
+      user_marker = user_profile_path(config).with_name('system-marker').read_text(encoding='utf-8').strip()
+      system_marker = system_marker_path(config).read_text(encoding='utf-8').strip()
+   except Exception:
+      user_marker = system_marker = ''
+   required = not user_marker or user_marker != system_marker
+   profile_exists = bool(profile.get('username')) and (os.name == 'nt' or bool(profile.get('shadow')))
+   return {'profile_exists': profile_exists, 'username': profile.get('username', ''),
+           'initialization_required': required, 'password_required': required and os.name == 'nt'}
+
+
+def shadow_hash(username):
+   for line in Path('/etc/shadow').read_text(encoding='utf-8').splitlines():
+      fields = line.split(':')
+      if fields[0] == username:
+         return fields[1]
+   raise RuntimeError('Lokales Benutzerkonto nicht gefunden: ' + username)
+
+
+def restore_shadow_hash(username, password_hash):
+   if not re.fullmatch(r'[A-Za-z0-9_.-]+', username) or ':' in password_hash or '\n' in password_hash:
+      raise RuntimeError('Ungültige Profildaten')
+   result = subprocess.run(['chpasswd', '-e'], input=username + ':' + password_hash,
+                           text=True, capture_output=True)
+   if result.returncode:
+      raise RuntimeError(result.stderr.strip() or 'Passworthash konnte nicht wiederhergestellt werden.')
+
+
+def disable_autologin():
+   if os.name == 'nt':
+      import winreg
+      key_path = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+      with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key_path, 0, winreg.KEY_SET_VALUE) as key:
+         winreg.SetValueEx(key, 'AutoAdminLogon', 0, winreg.REG_SZ, '0')
+         for name in ('DefaultPassword', 'DefaultUserName'):
+            try:
+               winreg.DeleteValue(key, name)
+            except FileNotFoundError:
+               pass
+      return
+   for filename in ('/etc/gdm3/custom.conf', '/etc/gdm/custom.conf', '/etc/lightdm/lightdm.conf', '/etc/sddm.conf'):
+      path = Path(filename)
+      if not path.is_file():
+         continue
+      text = path.read_text(encoding='utf-8')
+      text = re.sub(r'(?im)^\s*AutomaticLoginEnable\s*=.*$', 'AutomaticLoginEnable=false', text)
+      text = re.sub(r'(?im)^\s*(autologin-user|AutomaticLogin)\s*=.*$', r'# \1 disabled by LCS', text)
+      if 'gdm' in filename and not re.search(r'(?im)^\s*AutomaticLoginEnable\s*=', text):
+         daemon = re.search(r'(?im)^\s*\[daemon\]\s*$', text)
+         if daemon:
+            text = text[:daemon.end()] + '\nAutomaticLoginEnable=false' + text[daemon.end():]
+         else:
+            text += '\n[daemon]\nAutomaticLoginEnable=false\n'
+      path.write_text(text, encoding='utf-8')
+
+
+def initialize_user(config, username='', password=''):
+   profile_path = user_profile_path(config)
+   local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+   status = initialization_status(config)
+   profile = load_json(profile_path, {})
+   if not status['initialization_required']:
+      return {'ok': True, 'username': profile.get('username', '')}
+   if status['profile_exists'] and os.name != 'nt':
+      restore_shadow_hash(local_username, str(profile.get('shadow', '')))
+   elif not password or (not status['profile_exists'] and not username):
+      return {'ok': False, 'error': 'Benutzername und Passwort sind erforderlich.'}
+   elif os.name == 'nt':
+      result = subprocess.run(['net', 'user', local_username, password], capture_output=True, text=True)
+      if result.returncode:
+         return {'ok': False, 'error': result.stderr.strip() or result.stdout.strip() or 'Passwort konnte nicht gesetzt werden.'}
+   else:
+      default_password = config.get('LCS_DEFAULT_PASSWORD', 'corvi')
+      for secret in (default_password, password):
+         result = subprocess.run(['chpasswd'], input=local_username + ':' + secret, text=True, capture_output=True)
+         if result.returncode:
+            return {'ok': False, 'error': result.stderr.strip() or 'Passwort konnte nicht gesetzt werden.'}
+   username = profile.get('username', '') if status['profile_exists'] else username
+   if not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
+      return {'ok': False, 'error': 'Ungültiger Benutzername.'}
+   disable_autologin()
+   stored = {'username': username}
+   if os.name != 'nt':
+      stored['shadow'] = shadow_hash(local_username)
+   save_json(profile_path, stored, 0o600)
+   marker = os.urandom(24).hex()
+   profile_path.with_name('system-marker').write_text(marker + '\n', encoding='utf-8')
+   system_marker = system_marker_path(config)
+   system_marker.parent.mkdir(parents=True, exist_ok=True)
+   system_marker.write_text(marker + '\n', encoding='utf-8')
+   return {'ok': True, 'username': username}
+
+
+def user_capabilities(stack):
+   return [{'id': cap['id'], 'title': cap.get('title', cap['id']), 'description': cap.get('description', '')}
+           for cap in stack.get('capabilities', [])
+           if cap.get('scope') == 'system' and cap.get('user_executable')]
+
+
+def handle_user_request(config, runtime, request):
+   operation = request.get('operation')
+   if operation == 'status':
+      return {'ok': True, **initialization_status(config)}
+   if operation == 'initialize':
+      return initialize_user(config, str(request.get('username', '')).strip(), str(request.get('password', '')))
+   if operation == 'capabilities':
+      return {'ok': True, 'capabilities': user_capabilities(runtime['stack'])}
+   if operation == 'execute':
+      cap_id = str(request.get('capability_id', ''))
+      cap = next((item for item in runtime['stack'].get('capabilities', [])
+                  if item.get('id') == cap_id and item.get('scope') == 'system' and item.get('user_executable')), None)
+      if not cap:
+         return {'ok': False, 'error': 'Aktion ist nicht für Benutzer freigegeben.'}
+      local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+      if os.name == 'nt':
+         user_home = Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username
+      else:
+         import pwd
+         user_home = Path(pwd.getpwnam(local_username).pw_dir)
+      result = run_capability(cap, {}, timeout=int(cap.get('timeout', 120)),
+                              context={'username': local_username, 'user_home': str(user_home),
+                                       'data_path': str(user_profile_path(config).parent)})
+      return {'ok': int(result.get('exit_code', 0)) == 0, 'result': result,
+              'error': result.get('stderr', '') if int(result.get('exit_code', 0)) else ''}
+   return {'ok': False, 'error': 'Unbekannte Anfrage.'}
+
+
+def serve_user_client(config, runtime):
+   default_socket = (str(Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'LCS' / 'user.sock')
+                     if os.name == 'nt' else '/run/lcs/user.sock')
+   path = Path(config.get('LCS_USER_SOCKET', default_socket))
+   path.parent.mkdir(parents=True, exist_ok=True)
+   path.unlink(missing_ok=True)
+   with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+      listener.bind(str(path))
+      os.chmod(path, 0o666)
+      listener.listen(8)
+      while True:
+         connection, _ = listener.accept()
+         with connection:
+            try:
+               if hasattr(socket, 'SO_PEERCRED'):
+                  _pid, uid, _gid = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                  import pwd
+                  allowed_user = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+                  if uid not in (0, pwd.getpwnam(allowed_user).pw_uid):
+                     raise PermissionError('Zugriff auf den LCS-Systemdienst verweigert.')
+               raw = b''
+               while b'\n' not in raw and len(raw) < 1024 * 1024:
+                  chunk = connection.recv(65536)
+                  if not chunk:
+                     break
+                  raw += chunk
+               request = json.loads(raw.split(b'\n', 1)[0].decode('utf-8'))
+               response = handle_user_request(config, runtime, request)
+            except Exception as exc:
+               response = {'ok': False, 'error': str(exc)}
+            connection.sendall(json.dumps(response, ensure_ascii=False).encode('utf-8') + b'\n')
 
 
 def load_json(path, default=None):
@@ -450,6 +630,8 @@ def run_forever(env_path=None, stop_requested=None):
          'image_source': bool(state.get('image_source')),
       }, 0o644)
    stack = load_stack(config['LCS_FEATURE_ROOT'])
+   user_runtime = {'stack': stack}
+   threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
    last_poll = 0
    last_sync = 0
@@ -487,6 +669,7 @@ def run_forever(env_path=None, stop_requested=None):
          try:
             changed, new_stack = sync_stack(config, state)
             stack = new_stack
+            user_runtime['stack'] = stack
             if changed:
                report_event(config, state, 'stack_updated', '', {'generation': stack.get('generation', 0)}, paths['state_dir'])
          except Exception as exc:

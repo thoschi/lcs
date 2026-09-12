@@ -530,8 +530,6 @@ def action_result(device_id, token, payload):
          return 404, {'error': 'action not found'}
       conn.execute('UPDATE actions SET status=?, finished_at=?, lease_until=NULL, result_json=? WHERE id=?',
                    (status, now_ts(), json.dumps(result, ensure_ascii=False), action_id))
-      if row['capability_id'] == 'initialize-local-account':
-         conn.execute("UPDATE actions SET parameters_json='{}' WHERE id=?", (action_id,))
       log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
       if row['capability_id'] == '__lcs_reset_device__' and status == 'done':
          delete_device_data(conn, device['id'])
