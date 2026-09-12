@@ -218,8 +218,9 @@ Shadow-Zeile verbleiben ausschließlich im lokalen Nutzerspeicher.
 
 Ein zufälliger Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
 (`/var/lib/lcs/system-initialized` beziehungsweise `%PROGRAMDATA%\LCS\system-initialized`).
-Fehlt die Systemkopie nach einem Zurücksetzen, verarbeitet der beim Login
-gestartete Nutzerclient die Daten aus dem erhaltenen Nutzerspeicher. Linux stellt den
+Fehlt die Systemkopie nach einem Zurücksetzen, werden die Daten aus dem erhaltenen
+Nutzerspeicher erneut verarbeitet. Unter Linux stellt bereits der Systemdienst
+unmittelbar nach der erneuten Registrierung den
 Passworthash aus der dort gesicherten Shadow-Zeile ohne Rückfrage wieder her und
 deaktiviert den Autologin erneut. Windows fragt in diesem Fall einmalig das
 Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der

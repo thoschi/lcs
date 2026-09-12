@@ -23,6 +23,13 @@ from common.platform_info import hardware_info, logged_in_users
 VERSION = '0.6.0'
 
 
+def log(message, **fields):
+   details = ' '.join('%s=%s' % (key, json.dumps(value, ensure_ascii=False))
+                      for key, value in fields.items())
+   print('%s [lcs-agent] %s%s' % (time.strftime('%Y-%m-%dT%H:%M:%S%z'), message,
+                                  (' ' + details) if details else ''), flush=True)
+
+
 def default_paths():
    if os.name == 'nt':
       base = Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'LCS'
@@ -86,6 +93,7 @@ def shadow_entry(username):
 
 
 def restore_shadow_entry(username, entry):
+   log('Passworthash wird wiederhergestellt', local_username=username)
    fields = entry.split(':')
    # Alte Profile enthielten nur den Hash; neue sichern die vollständige Shadow-Zeile.
    password_hash = fields[1] if len(fields) == 9 and fields[0] == username else entry
@@ -95,9 +103,11 @@ def restore_shadow_entry(username, entry):
                            text=True, capture_output=True)
    if result.returncode:
       raise RuntimeError(result.stderr.strip() or 'Passworthash konnte nicht wiederhergestellt werden.')
+   log('Passworthash wurde wiederhergestellt', local_username=username)
 
 
 def disable_autologin():
+   log('Autologin wird deaktiviert', platform=os.name)
    if os.name == 'nt':
       import winreg
       key_path = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
@@ -108,7 +118,9 @@ def disable_autologin():
                winreg.DeleteValue(key, name)
             except FileNotFoundError:
                pass
+      log('Autologin wurde deaktiviert', configuration=key_path)
       return
+   changed = []
    for filename in ('/etc/gdm3/custom.conf', '/etc/gdm/custom.conf', '/etc/lightdm/lightdm.conf', '/etc/sddm.conf'):
       path = Path(filename)
       if not path.is_file():
@@ -123,6 +135,8 @@ def disable_autologin():
          else:
             text += '\n[daemon]\nAutomaticLoginEnable=False\n'
       path.write_text(text, encoding='utf-8')
+      changed.append(filename)
+   log('Autologin wurde deaktiviert', configurations=changed)
 
 
 def initialize_user(config, username='', password=''):
@@ -130,7 +144,10 @@ def initialize_user(config, username='', password=''):
    local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
    status = initialization_status(config)
    profile = load_json(profile_path, {})
+   log('Benutzereinrichtung geprüft', initialization_required=status['initialization_required'],
+       profile_exists=status['profile_exists'], local_username=local_username)
    if not status['initialization_required']:
+      log('Benutzereinrichtung bereits abgeschlossen')
       return {'ok': True, 'username': profile.get('username', '')}
    if status['profile_exists'] and os.name != 'nt':
       restore_shadow_entry(local_username, str(profile.get('shadow', '')))
@@ -159,6 +176,7 @@ def initialize_user(config, username='', password=''):
    system_marker = system_marker_path(config)
    system_marker.parent.mkdir(parents=True, exist_ok=True)
    system_marker.write_text(marker + '\n', encoding='utf-8')
+   log('Benutzereinrichtung abgeschlossen', username=username, local_username=local_username)
    return {'ok': True, 'username': username}
 
 
@@ -291,8 +309,10 @@ def read_enrollment_token(config):
 def enroll(config, state_dir):
    info = hardware_info()
    enrollment_token, token_path = read_enrollment_token(config)
+   log('Registrierung gestartet', hostname=info['hostname'], token_file=str(token_path))
    if not enrollment_token:
       raise RuntimeError('Enrollment token missing: %s' % token_path)
+   log('Enrollment-Token geladen', token_file=str(token_path))
    payload = {
       'enrollment_token': enrollment_token,
       'hostname': info['hostname'],
@@ -302,24 +322,39 @@ def enroll(config, state_dir):
    status, response = request_json(
       'POST', config['LCS_SERVER'].rstrip('/') + '/api/v1/enroll', payload,
       ca_file=config.get('LCS_CA_FILE') or None)
+   log('Registrierungsantwort empfangen', status=status)
    if status != 200:
       raise RuntimeError('Enrollment failed: %s' % response)
    save_server_settings(runtime_paths(config)['env'], response.get('settings', {}))
+   log('Servereinstellungen gespeichert', keys=sorted(response.get('settings', {}).keys()))
    for key in ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME', 'LCS_PASSWORD_USERNAME'):
       if response.get('settings', {}).get(key):
          config[key] = str(response['settings'][key])
    registered_hostname = str(response.get('hostname') or info['hostname'])
    restart_required = False
    if registered_hostname.lower() != info['hostname'].lower():
+      log('Hostname wird wiederhergestellt', current=info['hostname'], registered=registered_hostname)
       restart_required = set_hostname(registered_hostname)
    state = {'device_id': response['device_id'], 'device_token': response['device_token'],
             'hostname': registered_hostname, 'image_source': bool(response.get('image_source'))}
    save_state(state_dir, state)
+   log('Registrierung gespeichert', device_id=state['device_id'], hostname=registered_hostname,
+       image_source=state['image_source'])
+   if not state['image_source']:
+      user_status = initialization_status(config)
+      if user_status['profile_exists'] and user_status['initialization_required'] and os.name != 'nt':
+         log('Sofortige Benutzereinrichtung nach Registrierung gestartet')
+         result = initialize_user(config)
+         if not result.get('ok'):
+            raise RuntimeError('Automatic user initialization failed: ' + result.get('error', 'unknown error'))
+      else:
+         log('Sofortige Benutzereinrichtung nicht erforderlich', **user_status)
    try:
       if not state['image_source']:
          token_path.unlink(missing_ok=True)
+         log('Enrollment-Token nach erfolgreicher Registrierung entfernt', token_file=str(token_path))
    except Exception as exc:
-      print('warning: could not remove enrollment token:', exc, flush=True)
+      log('Enrollment-Token konnte nicht entfernt werden', error=str(exc))
    if restart_required:
       subprocess.Popen(['shutdown', '/r', '/t', '0'], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
       raise SystemExit(0)
@@ -454,11 +489,14 @@ def run_scheduled_system_capabilities(config, state, stack, state_dir):
          due, key, new_state = trigger_due(trigger, cap, scheduler, now)
          if not due:
             continue
+         log('Zeitgesteuerte Aktion gestartet', capability_id=cap['id'], trigger=trigger.get('type', ''))
          try:
             result = run_capability(cap, trigger.get('parameters', {}), timeout=int(cap.get('timeout', 120)))
             report_event(config, state, 'scheduled_result', cap['id'], result, state_dir)
+            log('Zeitgesteuerte Aktion abgeschlossen', capability_id=cap['id'], exit_code=result.get('exit_code'))
          except Exception as exc:
             report_event(config, state, 'scheduled_error', cap['id'], {'error': str(exc)}, state_dir)
+            log('Zeitgesteuerte Aktion fehlgeschlagen', capability_id=cap['id'], error=str(exc))
          scheduler[key] = new_state
          changed = True
    if changed:
@@ -500,6 +538,8 @@ def poll_manual_actions(config, state, stack, state_dir):
       return status
    for action in response.get('actions', []):
       pending[str(action['id'])] = action
+      log('Manuelle Aktion empfangen', action_id=action['id'], capability_id=action['capability_id'],
+          run_at=action.get('run_at', 0))
    save_json(pending_path, list(pending.values()), 0o600)
    return status
 
@@ -515,18 +555,19 @@ def execute_due_actions(config, state, stack, state_dir):
          continue
       action_id = action['id']
       cap_id = action['capability_id']
+      log('Aktion gestartet', action_id=action_id, capability_id=cap_id)
       ok = True
       if cap_id == '__lcs_reset_device__':
          payload = {'action_id': action_id, 'ok': True, 'result': {'message': 'device reset acknowledged'}}
          try:
             status, _ = post_device(config, state, '/api/v1/action/result', payload)
          except Exception as exc:
-            print('device reset acknowledgement unavailable:', exc, flush=True)
+            log('Bestätigung der Geräterücksetzung nicht verfügbar', action_id=action_id, error=str(exc))
             return
          # 401 means that the server processed an earlier acknowledgement and
          # already removed the device before the response reached this client.
          if status not in (200, 401):
-            print('device reset acknowledgement rejected:', status, flush=True)
+            log('Bestätigung der Geräterücksetzung abgelehnt', action_id=action_id, status=status)
             return
          reset_device(config, state, action.get('parameters', {}).get('reenrollment_token', ''))
          return
@@ -544,6 +585,7 @@ def execute_due_actions(config, state, stack, state_dir):
          except Exception:
             save_action_result(state_dir, payload)
          completed.append(key)
+         log('Aktion abgeschlossen', action_id=action_id, capability_id=cap_id, ok=ok)
          continue
       cap = capabilities.get(cap_id)
       if not cap:
@@ -564,6 +606,7 @@ def execute_due_actions(config, state, stack, state_dir):
       except Exception:
          save_action_result(state_dir, payload)
       completed.append(key)
+      log('Aktion abgeschlossen', action_id=action_id, capability_id=cap_id, ok=ok)
    for key in completed:
       pending.pop(key, None)
    if completed:
@@ -610,9 +653,12 @@ def shlex_quote(value):
 def reset_device(config, state, reenrollment_token=''):
    paths = runtime_paths(config)
    token_path = Path(config.get('LCS_TOKEN_FILE', paths['token']))
+   log('Geräterücksetzung gestartet', device_id=state.get('device_id', ''),
+       reenrollment_token=bool(reenrollment_token))
    if reenrollment_token:
       token_path.parent.mkdir(parents=True, exist_ok=True)
       token_path.write_text(reenrollment_token + '\n', encoding='utf-8')
+      log('Token für erneute Registrierung gespeichert', token_file=str(token_path))
       try:
          os.chmod(token_path, 0o600)
       except Exception:
@@ -636,6 +682,7 @@ def reset_device(config, state, reenrollment_token=''):
       subprocess.Popen(['sc.exe', 'stop', 'LCSService'], creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
    else:
       subprocess.Popen(['/bin/systemctl', 'stop', 'lcs-service.service'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+   log('Geräterücksetzung abgeschlossen; Dienst wird beendet')
    raise SystemExit(0)
 
 
@@ -652,6 +699,7 @@ def run_forever(env_path=None, stop_requested=None):
       os.environ['HTTPS_PROXY'] = proxy
    if not config.get('LCS_SERVER'):
       raise RuntimeError('LCS_SERVER missing in %s' % env_path)
+   log('Dienst gestartet', config=str(env_path), server=config['LCS_SERVER'])
    config.setdefault('LCS_FEATURE_ROOT', paths['feature_root'])
    heartbeat_interval = int(config.get('LCS_HEARTBEAT_SECONDS', '20'))
    poll_interval = int(config.get('LCS_POLL_SECONDS', '10'))
@@ -674,12 +722,14 @@ def run_forever(env_path=None, stop_requested=None):
    while True:
       now = time.time()
       if stop_requested and stop_requested():
+         log('Dienststopp angefordert')
          return
 
       current_hostname = socket.gethostname()
       if state.get('hostname') and state['hostname'].lower() != current_hostname.lower():
          # Hostnamen können erst nach dem Start des geklonten Systems gesetzt werden.
          state = {}
+         log('Klon erkannt; lokale Geräteidentität wird verworfen', current_hostname=current_hostname)
          user_runtime['client_enabled'] = False
          user_runtime['image_source'] = False
          for filename in ('device.json', 'device-public.json'):
@@ -690,8 +740,9 @@ def run_forever(env_path=None, stop_requested=None):
             state = enroll(config, paths['state_dir'])
             user_runtime['client_enabled'] = not state.get('image_source')
             user_runtime['image_source'] = bool(state.get('image_source'))
+            log('Registrierung erfolgreich', device_id=state['device_id'], image_source=state['image_source'])
          except Exception as exc:
-            print('enrollment unavailable:', exc, flush=True)
+            log('Registrierung nicht verfügbar; erneuter Versuch folgt', error=str(exc))
             time.sleep(3)
             continue
 
@@ -705,11 +756,12 @@ def run_forever(env_path=None, stop_requested=None):
                   last_heartbeat = now
                   continue
                if status != 200:
-                  print('template heartbeat failed:', response, flush=True)
+                  log('Musterclient-Heartbeat fehlgeschlagen', status=status, response=response)
                else:
                   apply_server_role(state, response, paths['state_dir'], user_runtime)
+                  log('Musterclient-Heartbeat erfolgreich')
             except Exception as exc:
-               print('template heartbeat unavailable:', exc, flush=True)
+               log('Musterclient-Heartbeat nicht verfügbar', error=str(exc))
             last_heartbeat = now
          time.sleep(1)
          continue
@@ -721,8 +773,11 @@ def run_forever(env_path=None, stop_requested=None):
             user_runtime['stack'] = stack
             if changed:
                report_event(config, state, 'stack_updated', '', {'generation': stack.get('generation', 0)}, paths['state_dir'])
+               log('Capability-Stack aktualisiert', generation=stack.get('generation', 0))
+            else:
+               log('Capability-Stack geprüft; keine Änderung', generation=stack.get('generation', 0))
          except Exception as exc:
-            print('stack sync unavailable; using local stack:', exc, flush=True)
+            log('Capability-Synchronisierung nicht verfügbar; lokaler Stand bleibt aktiv', error=str(exc))
          last_sync = now
 
       # Lokale Trigger und bereits vorab geladene zeitgesteuerte Aktionen
@@ -735,13 +790,14 @@ def run_forever(env_path=None, stop_requested=None):
             flush_events(config, state, paths['state_dir'])
             flush_action_results(config, state, paths['state_dir'])
             code = poll_manual_actions(config, state, stack, paths['state_dir'])
+            log('Aktionsabfrage abgeschlossen', status=code)
             if code == 401:
                state = {}
                user_runtime['client_enabled'] = False
                last_poll = now
                continue
          except Exception as exc:
-            print('action poll unavailable:', exc, flush=True)
+            log('Aktionsabfrage nicht verfügbar', error=str(exc))
          last_poll = now
 
       if now - last_heartbeat >= heartbeat_interval:
@@ -753,11 +809,12 @@ def run_forever(env_path=None, stop_requested=None):
                last_heartbeat = now
                continue
             if status != 200:
-               print('heartbeat failed:', response, flush=True)
+               log('Heartbeat fehlgeschlagen', status=status, response=response)
             else:
                apply_server_role(state, response, paths['state_dir'], user_runtime)
+               log('Heartbeat erfolgreich', role=response.get('role', 'client'))
          except Exception as exc:
-            print('heartbeat unavailable:', exc, flush=True)
+            log('Heartbeat nicht verfügbar', error=str(exc))
          last_heartbeat = now
 
       time.sleep(1)
