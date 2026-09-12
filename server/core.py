@@ -118,6 +118,15 @@ def init_db():
          payload_json TEXT NOT NULL DEFAULT '{}',
          created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS device_audit_log (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         device_id TEXT NOT NULL,
+         hostname TEXT NOT NULL,
+         event_type TEXT NOT NULL,
+         old_token_hash TEXT NOT NULL DEFAULT '',
+         new_token_hash TEXT NOT NULL DEFAULT '',
+         created_at INTEGER NOT NULL
+      );
       CREATE TABLE IF NOT EXISTS device_groups (
          group_name TEXT NOT NULL,
          device_id TEXT NOT NULL,
@@ -323,7 +332,7 @@ def enroll(payload):
       existing = None
       if reusable['token_type'] == 'template' and reusable['template_device_id']:
          existing = conn.execute('''
-         SELECT id, hostname, settings_json, template_device_id, is_image_source
+         SELECT id, hostname, settings_json, template_device_id, is_image_source, token_hash
          FROM devices WHERE lower(hostname)=lower(?) AND
             (id=? OR template_device_id=?)
          ''', (hostname, reusable['template_device_id'], reusable['template_device_id'])).fetchone()
@@ -337,6 +346,7 @@ def enroll(payload):
          reusable and reusable['token_type'] == 'template' and
          reusable['template_device_id'] in ('', device_id))
       device_token = secrets.token_urlsafe(32)
+      new_token_hash = token_hash(device_token)
       now = now_ts()
       conn.execute('''
          INSERT INTO devices(id, token_hash, hostname, platform, agent_version, first_seen, last_seen, is_image_source, settings_json, template_device_id)
@@ -351,7 +361,7 @@ def enroll(payload):
             settings_json=excluded.settings_json,
             template_device_id=excluded.template_device_id
       ''', (
-         device_id, token_hash(device_token), registered_hostname, payload.get('platform', ''),
+         device_id, new_token_hash, registered_hostname, payload.get('platform', ''),
          payload.get('agent_version', ''), now, now,
          int(image_source), settings_json, template_device_id
       ))
@@ -367,6 +377,16 @@ def enroll(payload):
                WHERE id=?''', (now, reusable['id']))
             _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
       log_event(conn, device_id, '', 'system', 'enroll', '', {'hostname': registered_hostname})
+      conn.execute('''INSERT INTO device_audit_log(
+         device_id, hostname, event_type, old_token_hash, new_token_hash, created_at)
+         VALUES(?,?,?,?,?,?)''', (device_id, registered_hostname,
+         'reregistered' if existing else 'registered',
+         existing['token_hash'] if existing else '', new_token_hash, now))
+      if existing and not hmac.compare_digest(existing['token_hash'], new_token_hash):
+         conn.execute('''INSERT INTO device_audit_log(
+            device_id, hostname, event_type, old_token_hash, new_token_hash, created_at)
+            VALUES(?,?,?,?,?,?)''', (device_id, registered_hostname, 'token_changed',
+            existing['token_hash'], new_token_hash, now))
    settings = {}
    if settings_json:
       try:

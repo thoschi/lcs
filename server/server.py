@@ -219,11 +219,28 @@ def dashboard_data():
    return devices, groups, assignments, tokens, actions, template_tree
 
 
-def render_admin(new_token=None, editor=None):
+def audit_data():
+   with core.db() as conn:
+      logs = [dict(row) for row in conn.execute('''
+         SELECT * FROM device_audit_log ORDER BY created_at DESC, id DESC
+      ''').fetchall()]
+      histories = [dict(row) for row in conn.execute('''
+         SELECT device_id, MAX(hostname) AS hostname,
+            SUM(CASE WHEN event_type IN ('registered', 'reregistered') THEN 1 ELSE 0 END) AS registration_count,
+            SUM(CASE WHEN event_type='token_changed' THEN 1 ELSE 0 END) AS token_change_count,
+            MAX(created_at) AS last_event
+         FROM device_audit_log GROUP BY device_id ORDER BY hostname
+      ''').fetchall()]
+   return logs, histories
+
+
+def render_admin(new_token=None, editor=None, page='overview'):
    devices, groups, assignments, tokens, actions, template_tree = dashboard_data()
+   logs, histories = audit_data() if page == 'logging' else ([], [])
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=load_manifest(),
-                          now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree)
+                          now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
+                          page=page, logs=logs, histories=histories)
 
 
 @app.get('/health')
@@ -336,15 +353,39 @@ def logout():
 @app.get('/admin')
 @admin_required
 def admin():
+   return render_admin()
+
+
+@app.get('/admin/clients')
+@admin_required
+def admin_clients():
+   return render_admin(page='clients')
+
+
+@app.get('/admin/tasks')
+@admin_required
+def admin_tasks():
    capability_id = request.args.get('edit', '').strip()
    if not capability_id:
-      return render_admin()
+      return render_admin(page='tasks')
    try:
       editor = load_capability_for_editor(capability_id)
    except (ValueError, zipfile.BadZipFile) as exc:
       flash(str(exc), 'error')
-      return redirect(url_for('admin') + '#capabilities')
-   return render_admin(editor=editor)
+      return redirect(url_for('admin_tasks') + '#capabilities')
+   return render_admin(editor=editor, page='tasks')
+
+
+@app.get('/admin/tokens')
+@admin_required
+def admin_tokens():
+   return render_admin(page='tokens')
+
+
+@app.get('/admin/logging')
+@admin_required
+def admin_logging():
+   return render_admin(page='logging')
 
 
 @app.get('/admin/client-status')
@@ -377,7 +418,7 @@ def save_group():
          ON CONFLICT(name) DO UPDATE SET description=excluded.description''',
          (name, request.form.get('description', '').strip()))
    flash('Gruppe gespeichert.', 'success')
-   return redirect(url_for('admin') + '#groups')
+   return redirect(url_for('admin_clients') + '#groups')
 
 
 @app.post('/admin/group-membership')
@@ -393,7 +434,7 @@ def group_membership():
          conn.execute('INSERT OR IGNORE INTO device_groups(group_name, device_id) VALUES(?,?)', (group, device_id))
    bump_generation()
    flash('Gruppenzuordnung aktualisiert.', 'success')
-   return redirect(url_for('admin') + '#devices')
+   return redirect(url_for('admin_clients') + '#devices')
 
 
 @app.post('/admin/device/<device_id>/generalize')
@@ -408,7 +449,7 @@ def generalize_device(device_id):
       flash(str(exc), 'error')
    else:
       flash('Generalisierung eingeplant. Ein neuer einmaliger Token wird an den Client ausgeliefert.', 'success')
-   return redirect(url_for('admin') + '#devices')
+   return redirect(url_for('admin_clients') + '#devices')
 
 
 @app.post('/admin/device/<device_id>/delete')
@@ -421,7 +462,7 @@ def delete_device(device_id):
          abort(404)
       core.delete_device_data(conn, device_id)
    flash('Serverdaten für %s vollständig gelöscht.' % device_row['hostname'], 'success')
-   return redirect(url_for('admin') + '#devices')
+   return redirect(url_for('admin_clients') + '#devices')
 
 
 @app.post('/admin/group/<name>/delete')
@@ -435,7 +476,7 @@ def delete_group(name):
       conn.execute('DELETE FROM groups WHERE name=?', (name,))
    bump_generation()
    flash('Gruppe gelöscht.', 'success')
-   return redirect(url_for('admin') + '#groups')
+   return redirect(url_for('admin_clients') + '#groups')
 
 
 @app.post('/admin/action-template/<int:template_id>/delete')
@@ -445,7 +486,7 @@ def delete_action_template(template_id):
    with core.db() as conn:
       conn.execute('DELETE FROM action_templates WHERE id=?', (template_id,))
    flash('Vorbereitete Aufgabe entfernt.', 'success')
-   return redirect(url_for('admin') + '#groups')
+   return redirect(url_for('admin_clients') + '#groups')
 
 
 @app.post('/admin/token')
@@ -461,9 +502,9 @@ def create_token():
                                         hostname=request.form.get('hostname', ''))
    except Exception as exc:
       flash(str(exc), 'error')
-      return redirect(url_for('admin') + '#tokens')
+      return redirect(url_for('admin_tokens') + '#tokens')
    flash('Vorläufiger Zugang erzeugt. Er wird beim ersten Enrollment aktiviert.', 'success')
-   return render_admin(new_token=token)
+   return render_admin(new_token=token, page='tokens')
 
 
 @app.post('/admin/token/<int:token_id>/toggle')
@@ -474,7 +515,7 @@ def toggle_token(token_id):
       conn.execute('UPDATE enrollment_tokens SET enabled=CASE enabled WHEN 1 THEN 0 ELSE 1 END WHERE id=?',
                    (token_id,))
    flash('Token-Status geändert.', 'success')
-   return redirect(url_for('admin') + '#tokens')
+   return redirect(url_for('admin_tokens') + '#tokens')
 
 
 @app.post('/admin/token/<int:token_id>/copy')
@@ -500,7 +541,7 @@ def delete_token(token_id):
          abort(404)
       conn.execute('DELETE FROM enrollment_tokens WHERE id=?', (token_id,))
    flash('Enrollment-Token %s gelöscht.' % token['name'], 'success')
-   return redirect(url_for('admin') + '#tokens')
+   return redirect(url_for('admin_tokens') + '#tokens')
 
 
 @app.post('/admin/capability/<capability_id>')
@@ -517,7 +558,7 @@ def edit_capability(capability_id):
    cap['user_executable'] = request.form.get('user_executable') == '1'
    bump_generation(payload)
    flash('Capability aktualisiert.', 'success')
-   return redirect(url_for('admin') + '#capabilities')
+   return redirect(url_for('admin_tasks') + '#capabilities')
 
 
 @app.post('/admin/capability-editor')
@@ -554,7 +595,7 @@ def capability_editor():
       flash(str(exc), 'error')
    else:
       flash('Aktion veröffentlicht. Sie kann nun zugeordnet und eingeplant werden.', 'success')
-   return redirect(url_for('admin') + '#editor')
+   return redirect(url_for('admin_tasks') + '#editor')
 
 
 @app.post('/admin/examples/install')
@@ -567,7 +608,7 @@ def install_examples():
          publish_capability(source)
          installed += 1
    flash('%d Beispielaktionen veröffentlicht; bitte den gewünschten Clients zuordnen.' % installed, 'success')
-   return redirect(url_for('admin') + '#capabilities')
+   return redirect(url_for('admin_tasks') + '#capabilities')
 
 
 @app.post('/admin/assignment')
@@ -589,7 +630,7 @@ def save_assignment():
           request.form.get('execution', 'manual')))
    bump_generation()
    flash('Capability-Zuordnung gespeichert.', 'success')
-   return redirect(url_for('admin') + '#capabilities')
+   return redirect(url_for('admin_tasks') + '#capabilities')
 
 
 @app.post('/admin/action')
@@ -628,7 +669,7 @@ def create_action():
    else:
       flash('%d Aktion(en) eingeplant%s.' % (len(devices),
             ' und für neue Gruppenmitglieder vorgemerkt' if remember else ''), 'success')
-   return redirect(url_for('admin') + '#actions')
+   return redirect(url_for('admin_tasks') + '#actions')
 
 
 def main():
