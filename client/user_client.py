@@ -70,7 +70,7 @@ def run_cli(config):
    return 0
 
 
-def run_gui(config):
+def run_gui(config, status):
    import tkinter as tk
    from tkinter import messagebox
 
@@ -200,7 +200,6 @@ def run_gui(config):
    root.protocol('WM_DELETE_WINDOW', root.withdraw)
    start_tray()
 
-   status = request_service(config, 'status')
    if status.get('initialization_required') and status.get('profile_exists') and status.get('password_required'):
       username.insert(0, status.get('username', ''))
       username.configure(state='readonly')
@@ -226,9 +225,13 @@ def run_gui(config):
 def main():
    config = load_env(config_path())
    try:
+      status = request_service(config, 'status')
+      if not status.get('client_enabled'):
+         print('Kein aktiver Nutzer-Client: Gerät ist noch nicht registriert oder dient als Image-Vorlage.')
+         return 0
       if '--cli' in sys.argv:
          return run_cli(config)
-      return run_gui(config)
+      return run_gui(config, status)
    except Exception as exc:
       print('LCS-Systemdienst nicht erreichbar:', exc)
       return 2

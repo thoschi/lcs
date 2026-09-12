@@ -168,7 +168,8 @@ def user_capabilities(stack):
 def handle_user_request(config, runtime, request):
    operation = request.get('operation')
    if operation == 'status':
-      return {'ok': True, **initialization_status(config)}
+      return {'ok': True, 'client_enabled': runtime.get('client_enabled', False),
+              **initialization_status(config)}
    if operation == 'initialize':
       return initialize_user(config, str(request.get('username', '')).strip(), str(request.get('password', '')))
    if operation == 'capabilities':
@@ -630,7 +631,8 @@ def run_forever(env_path=None, stop_requested=None):
          'image_source': bool(state.get('image_source')),
       }, 0o644)
    stack = load_stack(config['LCS_FEATURE_ROOT'])
-   user_runtime = {'stack': stack}
+   user_runtime = {'stack': stack,
+                   'client_enabled': bool(state.get('device_id') and not state.get('image_source'))}
    threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
    last_poll = 0
@@ -644,6 +646,7 @@ def run_forever(env_path=None, stop_requested=None):
       if not state.get('device_id') or not state.get('device_token'):
          try:
             state = enroll(config, paths['state_dir'])
+            user_runtime['client_enabled'] = not state.get('image_source')
          except Exception as exc:
             print('enrollment unavailable:', exc, flush=True)
             time.sleep(3)
@@ -655,6 +658,7 @@ def run_forever(env_path=None, stop_requested=None):
                status, response = template_heartbeat(config, state)
                if status == 401:
                   state = {}
+                  user_runtime['client_enabled'] = False
                   last_heartbeat = now
                   continue
                if status != 200:
@@ -688,6 +692,7 @@ def run_forever(env_path=None, stop_requested=None):
             code = poll_manual_actions(config, state, stack, paths['state_dir'])
             if code == 401:
                state = {}
+               user_runtime['client_enabled'] = False
                last_poll = now
                continue
          except Exception as exc:
@@ -699,6 +704,7 @@ def run_forever(env_path=None, stop_requested=None):
             status, response = heartbeat(config, state, stack)
             if status == 401:
                state = {}
+               user_runtime['client_enabled'] = False
                last_heartbeat = now
                continue
             if status != 200:
