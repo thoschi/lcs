@@ -20,6 +20,11 @@ def machine_id():
       out = _cmd(['powershell', '-NoProfile', '-Command', "(Get-CimInstance Win32_ComputerSystemProduct).UUID"])
       if out:
          return out.strip()
+   product_uuid = Path('/sys/class/dmi/id/product_uuid')
+   if product_uuid.exists():
+      value = product_uuid.read_text(encoding='utf-8', errors='ignore').strip()
+      if value and value != '00000000-0000-0000-0000-000000000000':
+         return value
    for path in ('/etc/machine-id', '/var/lib/dbus/machine-id'):
       p = Path(path)
       if p.exists():
