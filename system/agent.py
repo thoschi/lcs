@@ -77,15 +77,18 @@ def initialization_status(config):
            'initialization_required': required, 'password_required': required and os.name == 'nt'}
 
 
-def shadow_hash(username):
+def shadow_entry(username):
    for line in Path('/etc/shadow').read_text(encoding='utf-8').splitlines():
       fields = line.split(':')
       if fields[0] == username:
-         return fields[1]
+         return line
    raise RuntimeError('Lokales Benutzerkonto nicht gefunden: ' + username)
 
 
-def restore_shadow_hash(username, password_hash):
+def restore_shadow_entry(username, entry):
+   fields = entry.split(':')
+   # Alte Profile enthielten nur den Hash; neue sichern die vollständige Shadow-Zeile.
+   password_hash = fields[1] if len(fields) == 9 and fields[0] == username else entry
    if not re.fullmatch(r'[A-Za-z0-9_.-]+', username) or ':' in password_hash or '\n' in password_hash:
       raise RuntimeError('Ungültige Profildaten')
    result = subprocess.run(['chpasswd', '-e'], input=username + ':' + password_hash,
@@ -111,14 +114,14 @@ def disable_autologin():
       if not path.is_file():
          continue
       text = path.read_text(encoding='utf-8')
-      text = re.sub(r'(?im)^\s*AutomaticLoginEnable\s*=.*$', 'AutomaticLoginEnable=false', text)
+      text = re.sub(r'(?im)^\s*AutomaticLoginEnable\s*=.*$', 'AutomaticLoginEnable=False', text)
       text = re.sub(r'(?im)^\s*(autologin-user|AutomaticLogin)\s*=.*$', r'# \1 disabled by LCS', text)
       if 'gdm' in filename and not re.search(r'(?im)^\s*AutomaticLoginEnable\s*=', text):
          daemon = re.search(r'(?im)^\s*\[daemon\]\s*$', text)
          if daemon:
-            text = text[:daemon.end()] + '\nAutomaticLoginEnable=false' + text[daemon.end():]
+            text = text[:daemon.end()] + '\nAutomaticLoginEnable=False' + text[daemon.end():]
          else:
-            text += '\n[daemon]\nAutomaticLoginEnable=false\n'
+            text += '\n[daemon]\nAutomaticLoginEnable=False\n'
       path.write_text(text, encoding='utf-8')
 
 
@@ -130,7 +133,7 @@ def initialize_user(config, username='', password=''):
    if not status['initialization_required']:
       return {'ok': True, 'username': profile.get('username', '')}
    if status['profile_exists'] and os.name != 'nt':
-      restore_shadow_hash(local_username, str(profile.get('shadow', '')))
+      restore_shadow_entry(local_username, str(profile.get('shadow', '')))
    elif not password or (not status['profile_exists'] and not username):
       return {'ok': False, 'error': 'Benutzername und Passwort sind erforderlich.'}
    elif os.name == 'nt':
@@ -138,18 +141,18 @@ def initialize_user(config, username='', password=''):
       if result.returncode:
          return {'ok': False, 'error': result.stderr.strip() or result.stdout.strip() or 'Passwort konnte nicht gesetzt werden.'}
    else:
-      default_password = config.get('LCS_DEFAULT_PASSWORD', 'corvi')
-      for secret in (default_password, password):
-         result = subprocess.run(['chpasswd'], input=local_username + ':' + secret, text=True, capture_output=True)
-         if result.returncode:
-            return {'ok': False, 'error': result.stderr.strip() or 'Passwort konnte nicht gesetzt werden.'}
+      if not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
+         return {'ok': False, 'error': 'Ungültiger Benutzername.'}
+      result = subprocess.run(['chpasswd'], input=local_username + ':' + password, text=True, capture_output=True)
+      if result.returncode:
+         return {'ok': False, 'error': result.stderr.strip() or 'Passwort konnte nicht gesetzt werden.'}
    username = profile.get('username', '') if status['profile_exists'] else username
    if not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
       return {'ok': False, 'error': 'Ungültiger Benutzername.'}
    disable_autologin()
    stored = {'username': username}
    if os.name != 'nt':
-      stored['shadow'] = shadow_hash(local_username)
+      stored['shadow'] = shadow_entry(local_username)
    save_json(profile_path, stored, 0o600)
    marker = os.urandom(24).hex()
    profile_path.with_name('system-marker').write_text(marker + '\n', encoding='utf-8')
