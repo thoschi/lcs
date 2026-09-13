@@ -240,9 +240,11 @@ Passworthash aus der dort gesicherten Shadow-Zeile ohne Rückfrage wieder her un
 deaktiviert den Autologin erneut. Windows fragt in diesem Fall einmalig das
 Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der
 Benutzerclient kommuniziert ausschließlich über den lokalen Socket mit dem
-Systemdienst und nimmt niemals Kontakt zum Server auf. Er wird nicht automatisch
-gestartet, sondern dient über den Menüeintrag ausschließlich als Oberfläche zum
-Auslösen der vom Systemdienst angebotenen Benutzeraktionen.
+Systemdienst und nimmt niemals Kontakt zum Server auf. Unter Windows startet er bei
+der Benutzeranmeldung automatisch, damit eine erforderliche Erst- oder
+Wiederherstellungseinrichtung unmittelbar abgefragt wird. Der Menüeintrag öffnet
+zusätzlich die Oberfläche zum Auslösen der vom Systemdienst angebotenen
+Benutzeraktionen.
 
 Capabilities können `startup`-, `interval`- oder tägliche `daily`-Trigger besitzen.
 System-Capabilities mit `"user_executable": true` erscheinen zusätzlich im Menü des

@@ -233,7 +233,7 @@ def main():
          continue
       if status.get('client_enabled'):
          break
-      if status.get('image_source'):
+      if status.get('image_source') and os.name != 'nt':
          print('Kein aktiver Nutzer-Client: Gerät ist noch nicht registriert oder dient als Image-Vorlage.')
          return 0
       time.sleep(2)

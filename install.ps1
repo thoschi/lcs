@@ -256,6 +256,9 @@ function Install-UserClient {
    $shortcut.WorkingDirectory = $ClientRoot
    $shortcut.IconLocation = $icon
    $shortcut.Save()
+   $runPath = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+   $runCommand = '"{0}" "{1}"' -f $pythonw, $script
+   New-ItemProperty -Path $runPath -Name 'LCS User Client' -Value $runCommand -PropertyType String -Force | Out-Null
    Write-Host "LCS-User-Client installiert: $ClientRoot"
 }
 
