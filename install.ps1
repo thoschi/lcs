@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $SourceRoot = $PSScriptRoot
 $Operation = 'install'
-if ($Mode -in @('install', 'upgrade', 'uninstall')) {
+if ($Mode -in @('install', 'upgrade', 'uninstall', 'diagnose')) {
    $Operation = $Mode
    $Mode = $ServerUrl
    $ServerUrl = if ($InstallerArgs.Count) { $InstallerArgs[0] } else { '' }
@@ -47,6 +47,7 @@ Aufruf:
   .\install.ps1 upgrade workstation https://clients.example [--no-userclient]
   .\install.ps1 install all https://clients.example
   .\install.ps1 uninstall [server|service|client|workstation|all]
+  .\install.ps1 diagnose service
   .\install.ps1 reset-identity
 
 install und upgrade entsprechen den gleichnamigen Operationen von install.sh.
@@ -128,8 +129,10 @@ function Install-WindowsService([string]$Name, [string]$Python, [string]$Script,
    # pythonservice.exe muss das Dienstmodul auch mit System32 als Arbeitsverzeichnis finden.
    $venvRoot = Split-Path (Split-Path $Python -Parent) -Parent
    $sitePackages = Join-Path $venvRoot 'Lib\site-packages'
-   $moduleRoot = Split-Path (Split-Path $Script -Parent) -Parent
-   Write-Utf8 (Join-Path $sitePackages ($Name + '.pth')) ($moduleRoot + "`r`n")
+   $moduleRoot = Split-Path $Script -Parent
+   $applicationRoot = Split-Path $moduleRoot -Parent
+   $pythonPaths = @($moduleRoot, $applicationRoot) -join "`r`n"
+   Write-Utf8 (Join-Path $sitePackages ($Name + '.pth')) ($pythonPaths + "`r`n")
    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
    if ($service) {
       $service.Close()
@@ -137,6 +140,9 @@ function Install-WindowsService([string]$Name, [string]$Python, [string]$Script,
    }
    else { & $Python $Script --startup auto install }
    if ($LASTEXITCODE) { throw $ErrorMessage }
+   $serviceClass = [IO.Path]::GetFileNameWithoutExtension($Script) + '.' + $Name
+   $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$Name"
+   New-ItemProperty -Path $serviceKey -Name 'PythonClass' -Value $serviceClass -PropertyType String -Force | Out-Null
 }
 
 function Read-EnvValue([string]$Path, [string]$Key) {
@@ -402,7 +408,40 @@ function Reset-Identity {
    Write-Host 'Lokale LCS-Geräteidentität und Capability-Cache wurden gelöscht.'
 }
 
+function Diagnose-SystemService {
+   $python = Join-Path $ServiceRoot 'venv\Scripts\python.exe'
+   $script = Join-Path $ServiceRoot 'windows\windows_service.py'
+   Write-Host "ServiceRoot: $ServiceRoot"
+   Write-Host "Python:      $python"
+   Write-Host "Dienstmodul: $script"
+   foreach ($path in @($python, $script, $ClientEnv)) {
+      if (-not (Test-Path $path)) { throw "Erforderliche Datei fehlt: $path" }
+   }
+
+   Write-Host "`n1. Python und alle Dienstimporte pruefen"
+   @'
+import sys
+import win32service, win32serviceutil, servicemanager, windows_service, bootstrap
+print(sys.executable)
+print('Import check successful')
+'@ | & $python -
+   if ($LASTEXITCODE) { throw 'Importpruefung fehlgeschlagen.' }
+
+   Write-Host "`n2. Registrierung des Dienstes"
+   & sc.exe qc LCSService
+   & reg.exe query 'HKLM\SYSTEM\CurrentControlSet\Services\LCSService' /v PythonClass
+
+   Write-Host "`n3. Manueller Vordergrundstart (nach erfolgreicher Importpruefung)"
+   Write-Host "Stop-Service LCSService -ErrorAction SilentlyContinue"
+   Write-Host ('& "{0}" "{1}" debug' -f $python, $script)
+}
+
 if ($Operation -eq 'uninstall') { Uninstall-Product; exit 0 }
+if ($Operation -eq 'diagnose') {
+   if ($Mode -notin @('service', 'system')) { throw 'Diagnose wird derzeit für service/system unterstützt.' }
+   Diagnose-SystemService
+   exit 0
+}
 
 switch ($Mode.ToLowerInvariant()) {
    'server' { Install-Server }
