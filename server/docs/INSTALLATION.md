@@ -101,8 +101,9 @@ cd C:\Pfad\zu\lcs
 .\install.ps1 install workstation https://clients.corvi.schule
 ```
 
-`install.ps1` bietet wie `install.sh` die Modi `server`, `service`/`system`,
-`client`, `workstation`, `all` und `reset-identity` sowie die Optionen
+`install.ps1` bietet wie `install.sh` die Operationen `install`, `upgrade` und
+`uninstall`, die Modi `server`, `service`/`system`, `client`, `workstation`,
+`all` und `reset-identity` sowie die Optionen
 `--token-file` und `--no-userclient`. Die Standardpfade sind
 `%ProgramFiles%\LCS\Server`, `%ProgramFiles%\LCS\Service`,
 `%ProgramFiles%\LCS\Client` und `%ProgramData%\LCS`.
