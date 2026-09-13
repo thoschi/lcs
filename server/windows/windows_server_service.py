@@ -22,6 +22,7 @@ class LCSServer(win32serviceutil.ServiceFramework):
    _svc_name_ = 'LCSServer'
    _svc_display_name_ = 'LCS Management Server'
    _svc_description_ = 'Provides the LCS management API and administration interface.'
+   _exe_name_ = str(Path(sys.prefix) / 'pythonservice.exe')
 
    def SvcStop(self):
       self.ReportServiceStatus(win32service.SERVICE_STOP_PENDING)

@@ -109,6 +109,11 @@ function Install-PyWin32([string]$Python) {
    $postInstall = Join-Path (Split-Path $Python -Parent) 'pywin32_postinstall.py'
    & $Python $postInstall -install
    if ($LASTEXITCODE) { throw 'pywin32 konnte nicht für Windows-Dienste eingerichtet werden.' }
+   $venvRoot = Split-Path (Split-Path $Python -Parent) -Parent
+   $serviceHost = Join-Path $venvRoot 'pythonservice.exe'
+   if (-not (Test-Path $serviceHost)) {
+      Copy-Item (Join-Path $venvRoot 'Lib\site-packages\win32\pythonservice.exe') $serviceHost
+   }
 }
 
 function Stop-WindowsService([string]$Name) {
@@ -128,8 +133,10 @@ function Install-WindowsService([string]$Name, [string]$Python, [string]$Script,
    # pythonservice.exe muss das Dienstmodul auch mit System32 als Arbeitsverzeichnis finden.
    $venvRoot = Split-Path (Split-Path $Python -Parent) -Parent
    $sitePackages = Join-Path $venvRoot 'Lib\site-packages'
-   $moduleRoot = Split-Path (Split-Path $Script -Parent) -Parent
-   Write-Utf8 (Join-Path $sitePackages ($Name + '.pth')) ($moduleRoot + "`r`n")
+   $moduleRoot = Split-Path $Script -Parent
+   $applicationRoot = Split-Path $moduleRoot -Parent
+   $pythonPaths = @($moduleRoot, $applicationRoot) -join "`r`n"
+   Write-Utf8 (Join-Path $sitePackages ($Name + '.pth')) ($pythonPaths + "`r`n")
    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
    if ($service) {
       $service.Close()
