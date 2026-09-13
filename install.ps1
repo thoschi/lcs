@@ -103,6 +103,14 @@ function New-Venv([string]$Root) {
    return $venvPython
 }
 
+function Install-PyWin32([string]$Python) {
+   & $Python -m pip install --quiet pywin32
+   if ($LASTEXITCODE) { throw 'pywin32 konnte nicht installiert werden.' }
+   $postInstall = Join-Path (Split-Path $Python -Parent) 'pywin32_postinstall.py'
+   & $Python $postInstall -install
+   if ($LASTEXITCODE) { throw 'pywin32 konnte nicht für Windows-Dienste eingerichtet werden.' }
+}
+
 function Read-EnvValue([string]$Path, [string]$Key) {
    if (-not (Test-Path $Path)) { return '' }
    $line = Get-Content -LiteralPath $Path | Where-Object { $_ -match "^$([regex]::Escape($Key))=" } | Select-Object -Last 1
@@ -151,9 +159,6 @@ function Copy-Tree([string]$Source, [string]$Target) {
 function Request-EnrollmentToken {
    $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
    $password = $credential.GetNetworkCredential().Password
-   Write-Host "DEBUG: Server-Adresse: '$ServerUrl'"
-   Write-Host "DEBUG: Client-Hostname: '$env:COMPUTERNAME'"
-   Write-Host "DEBUG: Übermitteltes Enrollment-Passwort: '$password'"
    $json = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
    # Windows PowerShell kodiert String-Bodys sonst nicht zuverlässig als UTF-8.
    $body = [Text.Encoding]::UTF8.GetBytes($json)
@@ -225,8 +230,7 @@ function Install-SystemService {
    Copy-Tree (Join-Path $SourceRoot 'system') $ServiceRoot
    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $ServiceRoot 'linux')
    $python = New-Venv $ServiceRoot
-   & $python -m pip install --quiet pywin32
-   if ($LASTEXITCODE) { throw 'pywin32 konnte nicht installiert werden.' }
+   Install-PyWin32 $python
    Write-ClientEnv
    Ensure-EnrollmentToken
    $serviceScript = Join-Path $ServiceRoot 'windows\windows_service.py'
@@ -234,6 +238,7 @@ function Install-SystemService {
    & $python $serviceScript --startup auto install
    if ($LASTEXITCODE) { throw 'LCS-Systemdienst konnte nicht installiert werden.' }
    & $python $serviceScript start
+   if ($LASTEXITCODE) { throw "LCS-Systemdienst konnte nicht gestartet werden. Details: $DataRoot\service.log" }
    Write-Host 'LCS-Systemdienst wurde gestartet.'
    Write-Host "LCS-Systemdienst installiert: $ServiceRoot"
    Write-Host "Konfiguration: $ClientEnv"
@@ -298,8 +303,9 @@ function Install-Server {
       Copy-Item (Join-Path $SourceRoot 'server\bootstrap-manifest.json') $ServerRoot
    }
    $python = New-Venv $ServerRoot
-   & $python -m pip install --quiet -r (Join-Path $ServerRoot 'requirements.txt') pywin32
+   & $python -m pip install --quiet -r (Join-Path $ServerRoot 'requirements.txt')
    if ($LASTEXITCODE) { throw 'Server-Abhängigkeiten konnten nicht installiert werden.' }
+   Install-PyWin32 $python
    $secret = Read-EnvValue $ServerEnv 'LCS_SECRET_KEY'
    if (-not $secret) { $secret = New-RandomHex }
    $values = @{
@@ -322,6 +328,7 @@ function Install-Server {
    & $python $serverScript --startup auto install
    if ($LASTEXITCODE) { throw 'LCS-Serverdienst konnte nicht installiert werden.' }
    & $python $serverScript start
+   if ($LASTEXITCODE) { throw 'LCS-Serverdienst konnte nicht gestartet werden.' }
    Write-Host "LCS-Server installiert: $ServerRoot"
    Write-Host "Konfiguration: $ServerEnv"
 }
