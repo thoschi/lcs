@@ -190,7 +190,7 @@ function Clear-Runtime([string]$Root, [string[]]$Keep) {
 }
 
 function Set-ServerSettings($Settings) {
-   $allowed = @('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME')
+   $allowed = @('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME')
    $lines = if (Test-Path $ClientEnv) { @(Get-Content -LiteralPath $ClientEnv) } else { @() }
    $lines = @($lines | Where-Object {
       $line = $_
@@ -263,7 +263,8 @@ function Write-ClientEnv {
    $proxy = if ($InstallProxy) { $InstallProxy } else { Read-EnvValue $ClientEnv 'LCS_PROXY' }
    $ca = Read-EnvValue $ClientEnv 'LCS_CA_FILE'
    $userData = Read-EnvValue $ClientEnv 'LCS_USER_DATA'
-   $requireLocalUsername = Read-EnvValue $ClientEnv 'LCS_REQUIRE_LOCAL_USERNAME'
+   $requireLocalUsername = Read-EnvValue $ClientEnv 'LCS_USE_DOMAIN_USERNAME'
+   $passwordUsername = Read-EnvValue $ClientEnv 'LCS_PASSWORD_USERNAME'
    $defaultPassword = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
    $lines = @(
       "LCS_SERVER=$ServerUrl", 'LCS_HEARTBEAT_SECONDS=20', 'LCS_POLL_SECONDS=10', 'LCS_SYNC_SECONDS=60',
@@ -273,7 +274,8 @@ function Write-ClientEnv {
    if ($proxy) { $lines += "LCS_PROXY=$proxy" }
    if ($ca) { $lines += "LCS_CA_FILE=$ca" }
    if ($userData) { $lines += "LCS_USER_DATA=$userData" }
-   if ($requireLocalUsername) { $lines += "LCS_REQUIRE_LOCAL_USERNAME=$requireLocalUsername" }
+   if ($requireLocalUsername) { $lines += "LCS_USE_DOMAIN_USERNAME=$requireLocalUsername" }
+   if ($passwordUsername) { $lines += "LCS_PASSWORD_USERNAME=$passwordUsername" }
    Write-Utf8 $ClientEnv (($lines -join "`r`n") + "`r`n")
 }
 

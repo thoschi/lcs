@@ -16,7 +16,7 @@ BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 
 from capability_runtime import capability_map, load_stack, run_capability, sync_stack
-from common.config import load_env
+from common.config import env_bool, load_env
 from common.http_client import request_json
 from common.platform_info import hardware_info, logged_in_users
 
@@ -78,6 +78,9 @@ def user_marker_path(config):
 
 
 def initialization_status(config):
+   if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+      return {'profile_exists': False, 'username': '', 'initialization_required': False,
+              'password_required': False, 'domain_username': True}
    profile = load_json(user_profile_path(config), {})
    try:
       user_marker = user_marker_path(config).read_text(encoding='utf-8').strip()
@@ -192,15 +195,20 @@ def user_capabilities(stack):
            if cap.get('scope') == 'system' and cap.get('user_executable')]
 
 
-def handle_user_request(config, runtime, request):
+def handle_user_request(config, runtime, request, peer_username=''):
    operation = request.get('operation')
+   domain_username = peer_username or str(request.get('local_username', '')).strip()
    if operation == 'status':
+      status = initialization_status(config)
+      if status.get('domain_username'):
+         status['username'] = domain_username
       return {'ok': True, 'client_enabled': runtime.get('client_enabled', False),
-              'image_source': runtime.get('image_source', False),
-              **initialization_status(config)}
+              'image_source': runtime.get('image_source', False), **status}
    if not runtime.get('client_enabled', False):
       return {'ok': False, 'error': 'Der Nutzerclient ist für einen Musterclient deaktiviert.'}
    if operation == 'initialize':
+      if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+         return {'ok': True, 'username': domain_username}
       return initialize_user(config, str(request.get('username', '')).strip(), str(request.get('password', '')))
    if operation == 'capabilities':
       return {'ok': True, 'capabilities': user_capabilities(runtime['stack'])}
@@ -210,15 +218,22 @@ def handle_user_request(config, runtime, request):
                   if item.get('id') == cap_id and item.get('scope') == 'system' and item.get('user_executable')), None)
       if not cap:
          return {'ok': False, 'error': 'Aktion ist nicht für Benutzer freigegeben.'}
-      local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+      local_username = (domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else
+                        config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer')
+      if not re.fullmatch(r'[A-Za-z0-9_.@\\-]+', local_username):
+         return {'ok': False, 'error': 'Ungültiger lokaler Benutzername.'}
       if os.name == 'nt':
-         user_home = Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username
+         requested_home = str(request.get('user_home', '')).strip()
+         user_home = Path(requested_home) if requested_home else Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username
       else:
          import pwd
          user_home = Path(pwd.getpwnam(local_username).pw_dir)
+      data_path = (Path(config['LCS_USER_DATA']).expanduser() if config.get('LCS_USER_DATA') else
+                   (user_home / 'AppData' / 'Roaming' / 'LCS' if os.name == 'nt' else
+                    user_home / '.config' / 'lcs'))
       result = run_capability(cap, {}, timeout=int(cap.get('timeout', 120)),
                               context={'username': local_username, 'user_home': str(user_home),
-                                       'data_path': str(user_profile_path(config).parent)})
+                                       'data_path': str(data_path)})
       return {'ok': int(result.get('exit_code', 0)) == 0, 'result': result,
               'error': result.get('stderr', '') if int(result.get('exit_code', 0)) else ''}
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
@@ -291,11 +306,14 @@ def serve_user_client(config, runtime):
          connection, _ = listener.accept()
          with connection:
             try:
+               peer_username = ''
                if hasattr(socket, 'SO_PEERCRED'):
                   _pid, uid, _gid = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
                   import pwd
+                  peer_username = pwd.getpwuid(uid).pw_name
                   allowed_user = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
-                  if uid not in (0, pwd.getpwnam(allowed_user).pw_uid):
+                  if (not env_bool(config, 'LCS_USE_DOMAIN_USERNAME') and
+                        uid not in (0, pwd.getpwnam(allowed_user).pw_uid)):
                      raise PermissionError('Zugriff auf den LCS-Systemdienst verweigert.')
                raw = b''
                while b'\n' not in raw and len(raw) < 1024 * 1024:
@@ -304,7 +322,7 @@ def serve_user_client(config, runtime):
                      break
                   raw += chunk
                request = json.loads(raw.split(b'\n', 1)[0].decode('utf-8'))
-               response = handle_user_request(config, runtime, request)
+               response = handle_user_request(config, runtime, request, peer_username)
             except Exception as exc:
                response = {'ok': False, 'error': str(exc)}
             connection.sendall(json.dumps(response, ensure_ascii=False).encode('utf-8') + b'\n')
@@ -343,7 +361,7 @@ def save_state(state_dir, state):
 
 
 def save_server_settings(env_path, settings):
-   allowed = ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME', 'LCS_PASSWORD_USERNAME')
+   allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME')
    path = Path(env_path)
    try:
       lines = path.read_text(encoding='utf-8').splitlines()
@@ -386,7 +404,7 @@ def enroll(config, state_dir):
       raise RuntimeError('Enrollment failed: %s' % response)
    save_server_settings(runtime_paths(config)['env'], response.get('settings', {}))
    log('Servereinstellungen gespeichert', keys=sorted(response.get('settings', {}).keys()))
-   for key in ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME', 'LCS_PASSWORD_USERNAME'):
+   for key in ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME'):
       if response.get('settings', {}).get(key):
          config[key] = str(response['settings'][key])
    registered_hostname = str(response.get('hostname') or info['hostname'])

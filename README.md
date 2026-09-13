@@ -233,6 +233,13 @@ speichert seine unabhängige Benutzerbindung in `credentials-windows.json`. Das
 Klartextpasswort wird weder gespeichert noch übertragen. Auch Benutzername und
 Shadow-Zeile verbleiben ausschließlich im lokalen Nutzerspeicher.
 
+Bei Domänenrechnern kann stattdessen am Enrollment-Token „Angemeldeten
+Domänenbenutzer übernehmen“ gewählt werden. Dann übernimmt LCS die Identität des am
+Rechner angemeldeten Benutzers. Eine LCS-seitige Einrichtung von Benutzername oder
+Passwort sowie Änderungen am Autologin entfallen vollständig; ein gleichzeitig
+angegebener lokaler Benutzer wird ignoriert. Der Benutzerclient legt den konfigurierten
+LCS-Nutzerdatenpfad dennoch mit den Rechten des angemeldeten Domänenbenutzers an.
+
 Ein zufälliger, betriebssystemspezifischer Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
 (`/var/lib/lcs/system-initialized` beziehungsweise `%PROGRAMDATA%\LCS\system-initialized`).
 Nach jeder erfolgreichen (Neu-)Registrierung verarbeitet der Systemdienst unter

@@ -228,18 +228,18 @@ def verify_password(password, stored):
       return False
 
 
-def enrollment_settings(user_data='', require_local_username=False, password_username=''):
+def enrollment_settings(user_data='', use_domain_username=False, password_username=''):
    settings = {}
    user_data = str(user_data).strip()
    if '\n' in user_data or '\r' in user_data:
       raise ValueError('Benutzerdatenpfad darf keinen Zeilenumbruch enthalten')
    if user_data:
       settings['LCS_USER_DATA'] = user_data
-   settings['LCS_REQUIRE_LOCAL_USERNAME'] = 'true' if require_local_username else 'false'
+   settings['LCS_USE_DOMAIN_USERNAME'] = 'true' if use_domain_username else 'false'
    password_username = str(password_username).strip()
    if '\n' in password_username or '\r' in password_username:
       raise ValueError('Systembenutzername darf keinen Zeilenumbruch enthalten')
-   if password_username:
+   if password_username and not use_domain_username:
       settings['LCS_PASSWORD_USERNAME'] = password_username
    return settings
 

@@ -148,7 +148,7 @@ import sys
 
 path, raw = sys.argv[1:]
 settings = json.loads(raw).get('settings', {})
-allowed = ('LCS_USER_DATA', 'LCS_REQUIRE_LOCAL_USERNAME')
+allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME')
 lines = open(path, encoding='utf-8').read().splitlines() if os.path.exists(path) else []
 lines = [line for line in lines if not any(line.startswith(key + '=') for key in allowed)]
 for key in allowed:
@@ -422,11 +422,12 @@ write_client_env() {
    ensure_server_url
    mkdir -p "$LCS_SERVICE_ROOT"
 
-   local proxy ca user_data password_username default_password
+   local proxy ca user_data require_local_username password_username default_password
    proxy="$INSTALL_PROXY"
    [ -z "$proxy" ] && proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
    ca="$(read_env_value "$LCS_CLIENT_ENV" LCS_CA_FILE)"
    user_data="$(read_env_value "$LCS_CLIENT_ENV" LCS_USER_DATA)"
+   require_local_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_USE_DOMAIN_USERNAME)"
    password_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_PASSWORD_USERNAME)"
    default_password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
    if [ -z "$proxy" ]; then
@@ -452,6 +453,7 @@ EOF2
    [ -n "$proxy" ] && printf 'LCS_PROXY=%s\n' "$proxy" >> "$LCS_CLIENT_ENV"
    [ -n "$ca" ] && printf 'LCS_CA_FILE=%s\n' "$ca" >> "$LCS_CLIENT_ENV"
    [ -n "$user_data" ] && printf 'LCS_USER_DATA=%s\n' "$user_data" >> "$LCS_CLIENT_ENV"
+   [ -n "$require_local_username" ] && printf 'LCS_USE_DOMAIN_USERNAME=%s\n' "$require_local_username" >> "$LCS_CLIENT_ENV"
    [ -n "$password_username" ] && printf 'LCS_PASSWORD_USERNAME=%s\n' "$password_username" >> "$LCS_CLIENT_ENV"
    chmod 644 "$LCS_CLIENT_ENV"
    chown root:root "$LCS_CLIENT_ENV"
