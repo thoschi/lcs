@@ -21,10 +21,15 @@ def config_path():
 
 
 def request_service(config, operation, **payload):
-   default_socket = (str(Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'LCS' / 'user.sock')
-                     if os.name == 'nt' else '/run/lcs/user.sock')
-   socket_path = config.get('LCS_USER_SOCKET', default_socket)
    request = {'operation': operation, 'client_version': VERSION, **payload}
+   if os.name == 'nt':
+      from multiprocessing.connection import Client
+      address = config.get('LCS_USER_SOCKET', r'\\.\pipe\lcs-user')
+      with Client(address, family='AF_PIPE', authkey=None) as connection:
+         connection.send_bytes(json.dumps(request, ensure_ascii=False).encode('utf-8'))
+         return json.loads(connection.recv_bytes().decode('utf-8'))
+
+   socket_path = config.get('LCS_USER_SOCKET', '/run/lcs/user.sock')
    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
       connection.settimeout(180)
       connection.connect(socket_path)
