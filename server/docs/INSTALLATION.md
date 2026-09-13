@@ -86,6 +86,30 @@ Get-Content "$env:ProgramData\LCS\service.log" -Tail 50
 Der Windows-Dienst schreibt seine Agent-Ausgaben in diese Logdatei. Im
 Windows-Ereignisprotokoll stehen dagegen nur Start und unerwartetes Dienstende.
 
+Bei Fehler 1053 kann der Dienstprozess in einer administrativen PowerShell direkt
+geprüft werden, ohne den Installer erneut auszuführen:
+
+```powershell
+.\install.ps1 diagnose service
+```
+
+Die Diagnose prüft zuerst Python, pywin32 und sämtliche Dienstimporte und zeigt
+danach die SCM-Registrierung sowie den exakten Befehl für den Vordergrundstart an.
+So ist erkennbar, ob bereits Python beziehungsweise ein Import scheitert oder erst
+der Start durch den Service Control Manager. Für den anschließend ausgegebenen
+Vordergrundstart muss der registrierte Dienst beendet sein, beispielsweise:
+
+```powershell
+Stop-Service LCSService -ErrorAction SilentlyContinue
+& "$env:ProgramFiles\LCS\Service\venv\Scripts\python.exe" `
+  "$env:ProgramFiles\LCS\Service\windows\windows_service.py" debug
+```
+
+Damit erscheinen Import- und Startfehler unmittelbar in der Konsole. Beenden lässt
+sich der Vordergrundlauf mit `Strg+C`; der normale Dienst wird anschließend mit
+`Start-Service LCSService` wieder gestartet. Bei abweichendem `LCS_SERVICE_ROOT`
+müssen die beiden Pfade entsprechend angepasst werden.
+
 Wiederholte Meldungen `heartbeat unavailable` sprechen für URL-, TLS-, Proxy- oder
 Netzwerkprobleme. `heartbeat failed` mit HTTP 401 weist dagegen auf eine nicht mehr
 gültige lokale Geräteidentität hin.
