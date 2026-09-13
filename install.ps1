@@ -39,15 +39,18 @@ $EnrollmentToken = if ($env:LCS_ENROLLMENT_TOKEN) { $env:LCS_ENROLLMENT_TOKEN } 
 function Show-Usage {
    Write-Host @"
 Aufruf:
-  .\install.ps1 server
-  .\install.ps1 service https://clients.example --token-file C:\Pfad\token.txt
-  .\install.ps1 client https://clients.example
-  .\install.ps1 workstation https://clients.example --token-file C:\Pfad\token.txt [--no-userclient]
-  .\install.ps1 all https://clients.example
+  .\install.ps1 install server
+  .\install.ps1 upgrade server
+  .\install.ps1 install service https://clients.example --token-file C:\Pfad\token.txt
+  .\install.ps1 install client https://clients.example
+  .\install.ps1 install workstation https://clients.example --token-file C:\Pfad\token.txt [--no-userclient]
+  .\install.ps1 upgrade workstation https://clients.example [--no-userclient]
+  .\install.ps1 install all https://clients.example
   .\install.ps1 uninstall [server|service|client|workstation|all]
   .\install.ps1 reset-identity
 
-Modi und Optionen entsprechen install.sh. Alle Laufzeitpfade können über
+install und upgrade entsprechen den gleichnamigen Operationen von install.sh.
+Alle Laufzeitpfade können über
 LCS_*_ROOT bzw. LCS_*_ENV überschrieben werden.
 Optional verwendet LCS_PROXY einen Proxy für Installation und Systemdienst.
 "@
@@ -148,8 +151,10 @@ function Copy-Tree([string]$Source, [string]$Target) {
 function Request-EnrollmentToken {
    $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
    $password = $credential.GetNetworkCredential().Password
-   $body = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
-   $response = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json' -Body $body
+   $json = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
+   # Windows PowerShell kodiert String-Bodys sonst nicht zuverlässig als UTF-8.
+   $body = [Text.Encoding]::UTF8.GetBytes($json)
+   $response = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json; charset=utf-8' -Body $body
    Write-Utf8 $EnrollmentToken ($response.enrollment_token + "`r`n")
    Protect-File $EnrollmentToken
    Set-ServerSettings $response.settings
