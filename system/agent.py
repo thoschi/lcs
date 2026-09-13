@@ -218,19 +218,18 @@ def handle_user_request(config, runtime, request):
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
 
 
-def allow_windows_pipe_users(listener):
+def allow_windows_pipe_users(pipe_handle):
    import win32con
    import win32security
-   handle = listener._listener._handle
    security = win32security.GetSecurityInfo(
-      handle, win32security.SE_KERNEL_OBJECT, win32security.DACL_SECURITY_INFORMATION)
+      pipe_handle, win32security.SE_KERNEL_OBJECT, win32security.DACL_SECURITY_INFORMATION)
    dacl = security.GetSecurityDescriptorDacl() or win32security.ACL()
    dacl.AddAccessAllowedAce(
       win32security.ACL_REVISION,
       win32con.GENERIC_READ | win32con.GENERIC_WRITE,
       win32security.ConvertStringSidToSid('S-1-5-11'))
    win32security.SetSecurityInfo(
-      handle, win32security.SE_KERNEL_OBJECT, win32security.DACL_SECURITY_INFORMATION,
+      pipe_handle, win32security.SE_KERNEL_OBJECT, win32security.DACL_SECURITY_INFORMATION,
       None, None, dacl, None)
 
 
@@ -241,7 +240,7 @@ def serve_user_client(config, runtime):
       with Listener(address, family='AF_PIPE', authkey=None) as listener:
          while True:
             # multiprocessing erzeugt nach jeder Verbindung eine neue Pipe-Instanz.
-            allow_windows_pipe_users(listener)
+            allow_windows_pipe_users(listener._listener._handle_queue[-1])
             connection = listener.accept()
             with connection:
                try:
