@@ -151,6 +151,9 @@ function Copy-Tree([string]$Source, [string]$Target) {
 function Request-EnrollmentToken {
    $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
    $password = $credential.GetNetworkCredential().Password
+   Write-Host "DEBUG: Server-Adresse: '$ServerUrl'"
+   Write-Host "DEBUG: Client-Hostname: '$env:COMPUTERNAME'"
+   Write-Host "DEBUG: Übermitteltes Enrollment-Passwort: '$password'"
    $json = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
    # Windows PowerShell kodiert String-Bodys sonst nicht zuverlässig als UTF-8.
    $body = [Text.Encoding]::UTF8.GetBytes($json)
