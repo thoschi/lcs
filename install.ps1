@@ -159,6 +159,9 @@ function Install-WindowsService([string]$Name, [string]$Python, [string]$Script,
    $serviceClass = [IO.Path]::GetFileNameWithoutExtension($Script) + '.' + $Name
    $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$Name"
    New-ItemProperty -Path $serviceKey -Name 'PythonClass' -Value $serviceClass -PropertyType String -Force | Out-Null
+   # pythonservice.exe wertet die .pth-Dateien der venv nicht zuverlässig aus.
+   $pythonPath = @($sitePackages, (Join-Path $sitePackages 'win32'), (Join-Path $sitePackages 'win32\lib'), $moduleRoot, $applicationRoot) -join ';'
+   New-ItemProperty -Path $serviceKey -Name 'Environment' -Value @("PYTHONPATH=$pythonPath") -PropertyType MultiString -Force | Out-Null
 }
 
 function Read-EnvValue([string]$Path, [string]$Key) {
