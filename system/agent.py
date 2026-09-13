@@ -218,30 +218,50 @@ def handle_user_request(config, runtime, request):
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
 
 
-def allow_windows_pipe_users(listener):
+def allow_windows_pipe_users(pipe_handle):
    import win32con
    import win32security
-   handle = listener._listener._handle
    security = win32security.GetSecurityInfo(
-      handle, win32security.SE_KERNEL_OBJECT, win32security.DACL_SECURITY_INFORMATION)
+      pipe_handle, win32security.SE_KERNEL_OBJECT, win32security.DACL_SECURITY_INFORMATION)
    dacl = security.GetSecurityDescriptorDacl() or win32security.ACL()
    dacl.AddAccessAllowedAce(
       win32security.ACL_REVISION,
       win32con.GENERIC_READ | win32con.GENERIC_WRITE,
       win32security.ConvertStringSidToSid('S-1-5-11'))
    win32security.SetSecurityInfo(
-      handle, win32security.SE_KERNEL_OBJECT, win32security.DACL_SECURITY_INFORMATION,
+      pipe_handle, win32security.SE_KERNEL_OBJECT, win32security.DACL_SECURITY_INFORMATION,
       None, None, dacl, None)
 
 
 def serve_user_client(config, runtime):
    if os.name == 'nt':
-      from multiprocessing.connection import Listener
+      import _winapi
+      import win32con
+      from multiprocessing import connection as pipe_connection
+
+      class UserPipeListener(pipe_connection.PipeListener):
+         def _new_handle(self, first=False):
+            # Die ACL kann nur mit diesen Zugriffsrechten am Handle gesetzt werden.
+            flags = (_winapi.PIPE_ACCESS_DUPLEX | _winapi.FILE_FLAG_OVERLAPPED |
+                     win32con.READ_CONTROL | win32con.WRITE_DAC)
+            if first:
+               flags |= _winapi.FILE_FLAG_FIRST_PIPE_INSTANCE
+            handle = _winapi.CreateNamedPipe(
+               self._address, flags,
+               _winapi.PIPE_TYPE_MESSAGE | _winapi.PIPE_READMODE_MESSAGE | _winapi.PIPE_WAIT,
+               _winapi.PIPE_UNLIMITED_INSTANCES, pipe_connection.BUFSIZE, pipe_connection.BUFSIZE,
+               _winapi.NMPWAIT_WAIT_FOREVER, _winapi.NULL)
+            try:
+               allow_windows_pipe_users(handle)
+            except Exception:
+               _winapi.CloseHandle(handle)
+               raise
+            return handle
+
       address = config.get('LCS_USER_SOCKET', r'\\.\pipe\lcs-user')
-      with Listener(address, family='AF_PIPE', authkey=None) as listener:
+      listener = UserPipeListener(address)
+      try:
          while True:
-            # multiprocessing erzeugt nach jeder Verbindung eine neue Pipe-Instanz.
-            allow_windows_pipe_users(listener)
             connection = listener.accept()
             with connection:
                try:
@@ -250,6 +270,8 @@ def serve_user_client(config, runtime):
                except Exception as exc:
                   response = {'ok': False, 'error': str(exc)}
                connection.send_bytes(json.dumps(response, ensure_ascii=False).encode('utf-8'))
+      finally:
+         listener.close()
       return
 
    path = Path(config.get('LCS_USER_SOCKET', '/run/lcs/user.sock'))
