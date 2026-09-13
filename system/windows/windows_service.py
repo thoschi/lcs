@@ -16,6 +16,7 @@ class LCSService(win32serviceutil.ServiceFramework):
    _svc_name_ = 'LCSService'
    _svc_display_name_ = 'LCS System Service'
    _svc_description_ = 'Registers the device and reports status to the LCS management server.'
+   _exe_name_ = str(Path(sys.prefix) / 'pythonservice.exe')
 
    def __init__(self, args):
       super().__init__(args)
