@@ -1,3 +1,4 @@
+import getpass
 import json
 import os
 import socket
@@ -21,7 +22,8 @@ def config_path():
 
 
 def request_service(config, operation, **payload):
-   request = {'operation': operation, 'client_version': VERSION, **payload}
+   request = {'operation': operation, 'client_version': VERSION,
+              'local_username': getpass.getuser(), 'user_home': str(Path.home()), **payload}
    if os.name == 'nt':
       from multiprocessing.connection import Client
       address = config.get('LCS_USER_SOCKET', r'\\.\pipe\lcs-user')
@@ -243,6 +245,10 @@ def main():
          return 0
       time.sleep(2)
    try:
+      if status.get('domain_username'):
+         default_data = (Path.home() / 'AppData' / 'Roaming' / 'LCS' if os.name == 'nt' else
+                         Path.home() / '.config' / 'lcs')
+         Path(config.get('LCS_USER_DATA', default_data)).expanduser().mkdir(parents=True, exist_ok=True)
       if '--cli' in sys.argv:
          return run_cli(config)
       return run_gui(config, status)

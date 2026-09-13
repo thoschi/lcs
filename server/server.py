@@ -495,7 +495,7 @@ def create_token():
    check_csrf()
    try:
       settings = core.enrollment_settings(
-         request.form.get('user_data', ''), request.form.get('require_local_username') == '1',
+         request.form.get('user_data', ''), request.form.get('use_domain_username') == '1',
          request.form.get('password_username', ''))
       token = core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
                                         request.form.get('token_type', 'template') == 'template', settings=settings,
