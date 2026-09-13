@@ -12,13 +12,11 @@ import win32service
 import win32serviceutil
 import servicemanager
 
-from bootstrap import run
-
-
 class LCSService(win32serviceutil.ServiceFramework):
    _svc_name_ = 'LCSService'
    _svc_display_name_ = 'LCS System Service'
    _svc_description_ = 'Registers the device and reports status to the LCS management server.'
+   _exe_name_ = str(Path(sys.prefix) / 'pythonservice.exe')
 
    def __init__(self, args):
       super().__init__(args)
@@ -37,6 +35,7 @@ class LCSService(win32serviceutil.ServiceFramework):
       with log_path.open('a', encoding='utf-8', buffering=1) as log:
          with redirect_stdout(log), redirect_stderr(log):
             try:
+               from bootstrap import run
                run(os.environ.get('LCS_CONFIG'), stop_requested=stopped)
             except Exception:
                traceback.print_exc()
