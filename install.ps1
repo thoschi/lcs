@@ -420,9 +420,17 @@ function Diagnose-SystemService {
       if (-not (Test-Path $path)) { throw "Erforderliche Datei fehlt: $path" }
    }
 
-   Write-Host "`n1. Python und alle Dienstimporte prüfen"
-   & $python -c 'import sys; from pathlib import Path; root=Path(sys.argv[1]); sys.path[:0]=[str(root / "windows"), str(root)]; import win32service, win32serviceutil, servicemanager, windows_service, bootstrap; print(sys.executable); print("Importprüfung erfolgreich")' $ServiceRoot
-   if ($LASTEXITCODE) { throw 'Importprüfung fehlgeschlagen.' }
+   Write-Host "`n1. Python und alle Dienstimporte pruefen"
+   @'
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+sys.path[:0] = [str(root / 'windows'), str(root)]
+import win32service, win32serviceutil, servicemanager, windows_service, bootstrap
+print(sys.executable)
+print('Import check successful')
+'@ | & $python - $ServiceRoot
+   if ($LASTEXITCODE) { throw 'Importpruefung fehlgeschlagen.' }
 
    Write-Host "`n2. Registrierung des Dienstes"
    & sc.exe qc LCSService
