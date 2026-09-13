@@ -228,18 +228,21 @@ die Eingaben nur über den lokalen Unix-Socket (unter Windows über die lokale N
 `\\.\pipe\lcs-user`) an den Systemdienst.
 Dieser setzt erst danach das Passwort mit `chpasswd`, setzt in GDM
 `AutomaticLoginEnable=False` und sichert anschließend Benutzername und die vollständige
-zugehörige Zeile aus `/etc/shadow` mit Modus 0600 in `credentials.json`. Das
+zugehörige Zeile aus `/etc/shadow` mit Modus 0600 in `credentials-linux.json`. Windows
+speichert seine unabhängige Benutzerbindung in `credentials-windows.json`. Das
 Klartextpasswort wird weder gespeichert noch übertragen. Auch Benutzername und
 Shadow-Zeile verbleiben ausschließlich im lokalen Nutzerspeicher.
 
-Ein zufälliger Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
+Ein zufälliger, betriebssystemspezifischer Marker liegt sowohl im Nutzerspeicher als auch auf der Systempartition
 (`/var/lib/lcs/system-initialized` beziehungsweise `%PROGRAMDATA%\LCS\system-initialized`).
 Nach jeder erfolgreichen (Neu-)Registrierung verarbeitet der Systemdienst unter
 Linux die Daten aus dem erhaltenen Nutzerspeicher unabhängig vom kopierten Marker,
 stellt den
 Passworthash aus der dort gesicherten Shadow-Zeile ohne Rückfrage wieder her und
 deaktiviert den Autologin erneut. Windows fragt in diesem Fall einmalig das
-Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der
+Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Linux
+und Windows werden unabhängig voneinander einmalig eingerichtet und können dadurch
+künftig auch unterschiedliche plattformspezifische Profildaten verwalten. Der
 Benutzerclient kommuniziert ausschließlich über diese lokale IPC-Verbindung mit dem
 Systemdienst und nimmt niemals Kontakt zum Server auf. Unter Windows startet er bei
 der Benutzeranmeldung automatisch, damit eine erforderliche Erst- oder

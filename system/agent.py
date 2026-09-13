@@ -62,7 +62,8 @@ def user_profile_path(config):
    default = (str(Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username / 'AppData' / 'Roaming' / 'LCS')
               if os.name == 'nt' else '/home/%s/.config/lcs' % local_username)
    root = Path(config.get('LCS_USER_DATA', default)).expanduser()
-   return root / 'credentials.json'
+   platform = 'windows' if os.name == 'nt' else 'linux'
+   return root / ('credentials-' + platform + '.json')
 
 
 def system_marker_path(config):
@@ -71,10 +72,15 @@ def system_marker_path(config):
    return Path(config.get('LCS_SYSTEM_MARKER', default))
 
 
+def user_marker_path(config):
+   platform = 'windows' if os.name == 'nt' else 'linux'
+   return user_profile_path(config).with_name('system-marker-' + platform)
+
+
 def initialization_status(config):
    profile = load_json(user_profile_path(config), {})
    try:
-      user_marker = user_profile_path(config).with_name('system-marker').read_text(encoding='utf-8').strip()
+      user_marker = user_marker_path(config).read_text(encoding='utf-8').strip()
       system_marker = system_marker_path(config).read_text(encoding='utf-8').strip()
    except Exception:
       user_marker = system_marker = ''
@@ -172,7 +178,7 @@ def initialize_user(config, username='', password='', force=False):
       stored['shadow'] = shadow_entry(local_username)
    save_json(profile_path, stored, 0o600)
    marker = os.urandom(24).hex()
-   profile_path.with_name('system-marker').write_text(marker + '\n', encoding='utf-8')
+   user_marker_path(config).write_text(marker + '\n', encoding='utf-8')
    system_marker = system_marker_path(config)
    system_marker.parent.mkdir(parents=True, exist_ok=True)
    system_marker.write_text(marker + '\n', encoding='utf-8')
