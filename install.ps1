@@ -15,7 +15,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $SourceRoot = $PSScriptRoot
 $Operation = 'install'
-if ($Mode -in @('install', 'upgrade', 'uninstall')) {
+if ($Mode -in @('install', 'upgrade', 'uninstall', 'diagnose')) {
    $Operation = $Mode
    $Mode = $ServerUrl
    $ServerUrl = if ($InstallerArgs.Count) { $InstallerArgs[0] } else { '' }
@@ -47,6 +47,7 @@ Aufruf:
   .\install.ps1 upgrade workstation https://clients.example [--no-userclient]
   .\install.ps1 install all https://clients.example
   .\install.ps1 uninstall [server|service|client|workstation|all]
+  .\install.ps1 diagnose service
   .\install.ps1 reset-identity
 
 install und upgrade entsprechen den gleichnamigen Operationen von install.sh.
@@ -409,7 +410,35 @@ function Reset-Identity {
    Write-Host 'Lokale LCS-Geräteidentität und Capability-Cache wurden gelöscht.'
 }
 
+function Diagnose-SystemService {
+   $python = Join-Path $ServiceRoot 'venv\Scripts\python.exe'
+   $script = Join-Path $ServiceRoot 'windows\windows_service.py'
+   Write-Host "ServiceRoot: $ServiceRoot"
+   Write-Host "Python:      $python"
+   Write-Host "Dienstmodul: $script"
+   foreach ($path in @($python, $script, $ClientEnv)) {
+      if (-not (Test-Path $path)) { throw "Erforderliche Datei fehlt: $path" }
+   }
+
+   Write-Host "`n1. Python und alle Dienstimporte prüfen"
+   & $python -c 'import sys; from pathlib import Path; root=Path(sys.argv[1]); sys.path[:0]=[str(root / "windows"), str(root)]; import win32service, win32serviceutil, servicemanager, windows_service, bootstrap; print(sys.executable); print("Importprüfung erfolgreich")' $ServiceRoot
+   if ($LASTEXITCODE) { throw 'Importprüfung fehlgeschlagen.' }
+
+   Write-Host "`n2. Registrierung des Dienstes"
+   & sc.exe qc LCSService
+   & reg.exe query 'HKLM\SYSTEM\CurrentControlSet\Services\LCSService' /v PythonClass
+
+   Write-Host "`n3. Manueller Vordergrundstart (nach erfolgreicher Importprüfung)"
+   Write-Host "Stop-Service LCSService -ErrorAction SilentlyContinue"
+   Write-Host ('& "{0}" "{1}" debug' -f $python, $script)
+}
+
 if ($Operation -eq 'uninstall') { Uninstall-Product; exit 0 }
+if ($Operation -eq 'diagnose') {
+   if ($Mode -notin @('service', 'system')) { throw 'Diagnose wird derzeit für service/system unterstützt.' }
+   Diagnose-SystemService
+   exit 0
+}
 
 switch ($Mode.ToLowerInvariant()) {
    'server' { Install-Server }

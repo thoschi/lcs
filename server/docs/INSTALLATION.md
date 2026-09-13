@@ -87,7 +87,17 @@ Der Windows-Dienst schreibt seine Agent-Ausgaben in diese Logdatei. Im
 Windows-Ereignisprotokoll stehen dagegen nur Start und unerwartetes Dienstende.
 
 Bei Fehler 1053 kann der Dienstprozess in einer administrativen PowerShell direkt
-im Vordergrund gestartet werden. Zuvor muss der registrierte Dienst beendet sein:
+geprüft werden, ohne den Installer erneut auszuführen:
+
+```powershell
+.\install.ps1 diagnose service
+```
+
+Die Diagnose prüft zuerst Python, pywin32 und sämtliche Dienstimporte und zeigt
+danach die SCM-Registrierung sowie den exakten Befehl für den Vordergrundstart an.
+So ist erkennbar, ob bereits Python beziehungsweise ein Import scheitert oder erst
+der Start durch den Service Control Manager. Für den anschließend ausgegebenen
+Vordergrundstart muss der registrierte Dienst beendet sein, beispielsweise:
 
 ```powershell
 Stop-Service LCSService -ErrorAction SilentlyContinue
