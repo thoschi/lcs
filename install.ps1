@@ -145,6 +145,9 @@ function Install-WindowsService([string]$Name, [string]$Python, [string]$Script,
    }
    else { & $Python $Script --startup auto install }
    if ($LASTEXITCODE) { throw $ErrorMessage }
+   $serviceClass = [IO.Path]::GetFileNameWithoutExtension($Script) + '.' + $Name
+   $serviceKey = "HKLM:\SYSTEM\CurrentControlSet\Services\$Name"
+   New-ItemProperty -Path $serviceKey -Name 'PythonClass' -Value $serviceClass -PropertyType String -Force | Out-Null
 }
 
 function Read-EnvValue([string]$Path, [string]$Key) {
@@ -423,20 +426,17 @@ function Diagnose-SystemService {
    Write-Host "`n1. Python und alle Dienstimporte pruefen"
    @'
 import sys
-from pathlib import Path
-root = Path(sys.argv[1])
-sys.path[:0] = [str(root / 'windows'), str(root)]
 import win32service, win32serviceutil, servicemanager, windows_service, bootstrap
 print(sys.executable)
 print('Import check successful')
-'@ | & $python - $ServiceRoot
+'@ | & $python -
    if ($LASTEXITCODE) { throw 'Importpruefung fehlgeschlagen.' }
 
    Write-Host "`n2. Registrierung des Dienstes"
    & sc.exe qc LCSService
    & reg.exe query 'HKLM\SYSTEM\CurrentControlSet\Services\LCSService' /v PythonClass
 
-   Write-Host "`n3. Manueller Vordergrundstart (nach erfolgreicher Importprüfung)"
+   Write-Host "`n3. Manueller Vordergrundstart (nach erfolgreicher Importpruefung)"
    Write-Host "Stop-Service LCSService -ErrorAction SilentlyContinue"
    Write-Host ('& "{0}" "{1}" debug' -f $python, $script)
 }
