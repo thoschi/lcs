@@ -115,7 +115,9 @@ function Install-PyWin32([string]$Python) {
    $sitePackages = Join-Path $venvRoot 'Lib\site-packages'
    $packagedServiceHost = Join-Path $sitePackages 'win32\pythonservice.exe'
    if (Test-Path $packagedServiceHost) {
-      Copy-Item $packagedServiceHost $serviceHost -Force
+      # Eine identische, noch gesperrte Dienstdatei muss nicht ersetzt werden.
+      $serviceHostCurrent = (Test-Path $serviceHost) -and ((Get-FileHash $packagedServiceHost).Hash -eq (Get-FileHash $serviceHost).Hash)
+      if (-not $serviceHostCurrent) { Copy-Item $packagedServiceHost $serviceHost -Force }
    }
    elseif (-not (Test-Path $serviceHost)) {
       throw 'pythonservice.exe wurde von pywin32 nicht installiert.'
