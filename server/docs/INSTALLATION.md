@@ -110,6 +110,12 @@ sich der Vordergrundlauf mit `Strg+C`; der normale Dienst wird anschließend mit
 `Start-Service LCSService` wieder gestartet. Bei abweichendem `LCS_SERVICE_ROOT`
 müssen die beiden Pfade entsprechend angepasst werden.
 
+Bei einer bereits vorhandenen Installation muss nach dem Update erneut
+`install.ps1 upgrade service` ausgeführt werden. Dabei werden neben
+`pythonservice.exe` auch die zugehörigen pywin32-DLLs in das Stammverzeichnis der
+virtuellen Umgebung kopiert. Fehlen sie dort, kann Windows den Diensthost noch vor
+dem ersten Python-Import nicht laden und meldet lediglich Fehler 1053.
+
 Wiederholte Meldungen `heartbeat unavailable` sprechen für URL-, TLS-, Proxy- oder
 Netzwerkprobleme. `heartbeat failed` mit HTTP 401 weist dagegen auf eine nicht mehr
 gültige lokale Geräteidentität hin.
