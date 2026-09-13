@@ -111,6 +111,29 @@ function Install-PyWin32([string]$Python) {
    if ($LASTEXITCODE) { throw 'pywin32 konnte nicht für Windows-Dienste eingerichtet werden.' }
 }
 
+function Stop-WindowsService([string]$Name) {
+   $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+   if (-not $service) { return $false }
+   try {
+      if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::Stopped) {
+         if ($service.Status -ne [System.ServiceProcess.ServiceControllerStatus]::StopPending) { $service.Stop() }
+         $service.WaitForStatus([System.ServiceProcess.ServiceControllerStatus]::Stopped, [TimeSpan]::FromSeconds(30))
+      }
+   }
+   finally { $service.Close() }
+   return $true
+}
+
+function Install-WindowsService([string]$Name, [string]$Python, [string]$Script, [string]$ErrorMessage) {
+   $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+   if ($service) {
+      $service.Close()
+      & $Python $Script --startup auto update
+   }
+   else { & $Python $Script --startup auto install }
+   if ($LASTEXITCODE) { throw $ErrorMessage }
+}
+
 function Read-EnvValue([string]$Path, [string]$Key) {
    if (-not (Test-Path $Path)) { return '' }
    $line = Get-Content -LiteralPath $Path | Where-Object { $_ -match "^$([regex]::Escape($Key))=" } | Select-Object -Last 1
@@ -224,7 +247,7 @@ function Write-ClientEnv {
 
 function Install-SystemService {
    Require-ServerUrl
-   & sc.exe stop LCSService 2>$null | Out-Null
+   Stop-WindowsService 'LCSService' | Out-Null
    New-Item -ItemType Directory -Force -Path $ServiceRoot, $StateRoot, $FeatureRoot | Out-Null
    Clear-Runtime $ServiceRoot @('features', 'state', 'venv', 'client.env', 'enrollment.token')
    Copy-Tree (Join-Path $SourceRoot 'system') $ServiceRoot
@@ -234,9 +257,7 @@ function Install-SystemService {
    Write-ClientEnv
    Ensure-EnrollmentToken
    $serviceScript = Join-Path $ServiceRoot 'windows\windows_service.py'
-   & $python $serviceScript remove 2>$null | Out-Null
-   & $python $serviceScript --startup auto install
-   if ($LASTEXITCODE) { throw 'LCS-Systemdienst konnte nicht installiert werden.' }
+   Install-WindowsService 'LCSService' $python $serviceScript 'LCS-Systemdienst konnte nicht installiert oder aktualisiert werden.'
    & $python $serviceScript start
    if ($LASTEXITCODE) { throw "LCS-Systemdienst konnte nicht gestartet werden. Details: $DataRoot\service.log" }
    Write-Host 'LCS-Systemdienst wurde gestartet.'
@@ -288,7 +309,7 @@ function New-RandomHex([int]$Bytes = 32) {
 }
 
 function Install-Server {
-   & sc.exe stop LCSServer 2>$null | Out-Null
+   Stop-WindowsService 'LCSServer' | Out-Null
    New-Item -ItemType Directory -Force -Path $ServerRoot | Out-Null
    Clear-Runtime $ServerRoot @('data', 'releases', 'bootstrap-manifest.json', 'venv', 'server.env')
    foreach ($name in @('core.py', 'server.py', 'lcsctl.py', 'requirements.txt', 'server.env.example')) {
@@ -324,9 +345,7 @@ function Install-Server {
    Write-Utf8 $ServerEnv (($serverLines -join "`r`n") + "`r`n")
    Protect-File $ServerEnv
    $serverScript = Join-Path $ServerRoot 'windows\windows_server_service.py'
-   & $python $serverScript remove 2>$null | Out-Null
-   & $python $serverScript --startup auto install
-   if ($LASTEXITCODE) { throw 'LCS-Serverdienst konnte nicht installiert werden.' }
+   Install-WindowsService 'LCSServer' $python $serverScript 'LCS-Serverdienst konnte nicht installiert oder aktualisiert werden.'
    & $python $serverScript start
    if ($LASTEXITCODE) { throw 'LCS-Serverdienst konnte nicht gestartet werden.' }
    Write-Host "LCS-Server installiert: $ServerRoot"
