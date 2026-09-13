@@ -113,7 +113,13 @@ function Install-PyWin32([string]$Python) {
    $venvRoot = Split-Path (Split-Path $Python -Parent) -Parent
    $serviceHost = Join-Path $venvRoot 'pythonservice.exe'
    $sitePackages = Join-Path $venvRoot 'Lib\site-packages'
-   Copy-Item (Join-Path $sitePackages 'win32\pythonservice.exe') $serviceHost -Force
+   $packagedServiceHost = Join-Path $sitePackages 'win32\pythonservice.exe'
+   if (Test-Path $packagedServiceHost) {
+      Copy-Item $packagedServiceHost $serviceHost -Force
+   }
+   elseif (-not (Test-Path $serviceHost)) {
+      throw 'pythonservice.exe wurde von pywin32 nicht installiert.'
+   }
 
    # Der SCM erweitert PATH nicht um pywin32_system32. Die DLLs müssen daher
    # direkt neben pythonservice.exe liegen, damit der Diensthost laden kann.
