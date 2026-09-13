@@ -219,9 +219,22 @@ def handle_user_request(config, runtime, request):
 
 
 def serve_user_client(config, runtime):
-   default_socket = (str(Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'LCS' / 'user.sock')
-                     if os.name == 'nt' else '/run/lcs/user.sock')
-   path = Path(config.get('LCS_USER_SOCKET', default_socket))
+   if os.name == 'nt':
+      from multiprocessing.connection import Listener
+      address = config.get('LCS_USER_SOCKET', r'\\.\pipe\lcs-user')
+      with Listener(address, family='AF_PIPE', authkey=None) as listener:
+         while True:
+            connection = listener.accept()
+            with connection:
+               try:
+                  request = json.loads(connection.recv_bytes().decode('utf-8'))
+                  response = handle_user_request(config, runtime, request)
+               except Exception as exc:
+                  response = {'ok': False, 'error': str(exc)}
+               connection.send_bytes(json.dumps(response, ensure_ascii=False).encode('utf-8'))
+      return
+
+   path = Path(config.get('LCS_USER_SOCKET', '/run/lcs/user.sock'))
    path.parent.mkdir(parents=True, exist_ok=True)
    path.unlink(missing_ok=True)
    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:

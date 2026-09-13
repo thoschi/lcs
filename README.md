@@ -224,7 +224,8 @@ Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`
 `LCS_USER_DATA` bezeichnet genau einen Nutzerspeicher; es gibt keine Unterordner
 für verschiedene Benutzer. Standard ist `/home/nutzer/.config/lcs`. Bei der ersten
 Anmeldung fragt der Client Benutzername und Passwort mit Wiederholung ab. Er übergibt
-die Eingaben nur über den lokalen Unix-Socket an den als root laufenden Systemdienst.
+die Eingaben nur über den lokalen Unix-Socket (unter Windows über die lokale Named Pipe
+`\\.\pipe\lcs-user`) an den Systemdienst.
 Dieser setzt erst danach das Passwort mit `chpasswd`, setzt in GDM
 `AutomaticLoginEnable=False` und sichert anschließend Benutzername und die vollständige
 zugehörige Zeile aus `/etc/shadow` mit Modus 0600 in `credentials.json`. Das
@@ -239,7 +240,7 @@ stellt den
 Passworthash aus der dort gesicherten Shadow-Zeile ohne Rückfrage wieder her und
 deaktiviert den Autologin erneut. Windows fragt in diesem Fall einmalig das
 Passwort ab und setzt damit das lokale Konto; weitere Abfragen gibt es nicht. Der
-Benutzerclient kommuniziert ausschließlich über den lokalen Socket mit dem
+Benutzerclient kommuniziert ausschließlich über diese lokale IPC-Verbindung mit dem
 Systemdienst und nimmt niemals Kontakt zum Server auf. Unter Windows startet er bei
 der Benutzeranmeldung automatisch, damit eine erforderliche Erst- oder
 Wiederherstellungseinrichtung unmittelbar abgefragt wird. Der Menüeintrag öffnet
