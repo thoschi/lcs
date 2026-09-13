@@ -243,7 +243,7 @@ def serve_user_client(config, runtime):
          def _new_handle(self, first=False):
             # Die ACL kann nur mit diesen Zugriffsrechten am Handle gesetzt werden.
             flags = (_winapi.PIPE_ACCESS_DUPLEX | _winapi.FILE_FLAG_OVERLAPPED |
-                     win32con.READ_CONTROL | win32con.WRITE_DAC)
+                     win32con.WRITE_DAC)
             if first:
                flags |= _winapi.FILE_FLAG_FIRST_PIPE_INSTANCE
             handle = _winapi.CreateNamedPipe(
