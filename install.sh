@@ -289,7 +289,7 @@ LCS_SERVER_HOST=$old_host
 LCS_SERVER_PORT=$old_port
 LCS_RELEASES_DIR=$LCS_SERVER_ROOT/releases
 LCS_SOURCE_ROOT=$SOURCE_ROOT
-LCS_MANIFEST_FILE=$LCS_SERVER_ROOT/bootstrap-manifest.json
+LCS_MANIFEST_FILE=$LCS_SERVER_ROOT/data/bootstrap-manifest.json
 LCS_SECRET_KEY=$old_secret
 LCS_OIDC_DISCOVERY_URL=$old_discovery
 LCS_OIDC_CLIENT_ID=$old_client_id
@@ -318,13 +318,15 @@ migrate_server_data() {
       done
    fi
 
-   if [ ! -s "$LCS_SERVER_ROOT/bootstrap-manifest.json" ]; then
+   local manifest_target="$LCS_SERVER_ROOT/data/bootstrap-manifest.json"
+   if [ ! -s "$manifest_target" ]; then
       local old
       for old in \
+         "$LCS_SERVER_ROOT/bootstrap-manifest.json" \
          /opt/lmn-client/server/bootstrap-manifest.json \
          /opt/lmn-client-server/bootstrap-manifest.json; do
          if [ -f "$old" ]; then
-            cp "$old" "$LCS_SERVER_ROOT/bootstrap-manifest.json"
+            cp "$old" "$manifest_target"
             break
          fi
       done
@@ -393,8 +395,8 @@ install_server() {
    cp -a "$SOURCE_ROOT/server/examples" "$LCS_SERVER_ROOT/"
    cp -a "$SOURCE_ROOT/server/web" "$LCS_SERVER_ROOT/"
 
-   if [ ! -f "$LCS_SERVER_ROOT/bootstrap-manifest.json" ]; then
-      cp "$SOURCE_ROOT/server/bootstrap-manifest.json" "$LCS_SERVER_ROOT/"
+   if [ ! -f "$LCS_SERVER_ROOT/data/bootstrap-manifest.json" ]; then
+      cp "$SOURCE_ROOT/server/bootstrap-manifest.json" "$LCS_SERVER_ROOT/data/"
    fi
 
    if [ ! -d "$LCS_SERVER_ROOT/venv" ]; then
@@ -406,7 +408,6 @@ install_server() {
 
    chown -R root:root "$LCS_SERVER_ROOT"
    chown -R "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/data" "$LCS_SERVER_ROOT/releases"
-   chown "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/bootstrap-manifest.json"
 
    mkdir -p "$LCS_SYSTEMD_ROOT"
    render_template "$SOURCE_ROOT/server/templates/lcs-server.service.in" "$LCS_SYSTEMD_ROOT/lcs-server.service"
