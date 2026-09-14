@@ -140,7 +140,7 @@ def run_capability(capability, parameters=None, timeout=120, context=None):
    request = {'parameters': parameters or {}, 'context': context or {}}
    executable = Path(sys.executable)
    if os.name == 'nt' and executable.name.lower() == 'pythonservice.exe':
-      executable = Path(sys.prefix) / 'Scripts' / 'python.exe'
+      executable = executable.parent / 'Scripts' / 'python.exe'
       if not executable.is_file():
          raise RuntimeError('Python interpreter for capability execution not found: ' + str(executable))
    command = [str(executable), str(runner), str(package_path), json.dumps(request, ensure_ascii=False)]
