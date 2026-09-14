@@ -24,6 +24,10 @@ Standardmäßig entstehen ausschließlich LCS-Laufzeitdaten unter `/opt/lcs-serv
 ```
 
 Die systemd-Unit liegt systembedingt unter `/etc/systemd/system/lcs-server.service`.
+Sie startet Gunicorn mit einem regelmäßig erneuerten Worker statt des Flask-Entwicklungsservers.
+Dadurch werden Ressourcen spätestens nach der in `LCS_SERVER_MAX_REQUESTS` konfigurierten
+Anzahl von Anfragen vollständig freigegeben. Threadzahl, Zeitlimit und Recycling-Grenze
+können in `/opt/lcs-server/server.env` angepasst werden.
 
 Für die Webadministration müssen anschließend die `LCS_OIDC_*`-Werte und
 `LCS_ADMIN_USERS` in `server.env` gesetzt werden. Danach wird der Dienst mit
