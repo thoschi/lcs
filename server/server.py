@@ -202,7 +202,10 @@ def dashboard_data():
          ORDER BY et.created_at DESC
       ''').fetchall()]
       actions = [dict(row) for row in conn.execute('''
-         SELECT a.*, d.hostname FROM actions a JOIN devices d ON d.id=a.device_id
+         SELECT a.*, d.hostname, executed.platform AS execution_platform,
+            executed.id AS executed_device_id
+         FROM actions a JOIN devices d ON d.id=a.device_id
+         LEFT JOIN devices executed ON executed.id=a.execution_device_id
          ORDER BY a.id DESC LIMIT 40
       ''').fetchall()]
    for item in devices:
@@ -242,9 +245,11 @@ def render_admin(new_token=None, editor=None, page='overview'):
                        if device['hostname'].lower() == item['hostname'].lower()), None)
       if existing:
          existing['connection_count'] += 1
+         existing['connections'].append(item)
       else:
          target = dict(item)
          target['connection_count'] = 1
+         target['connections'] = [item]
          task_devices.append(target)
    logs, histories = audit_data() if page == 'logging' else ([], [])
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,

@@ -178,6 +178,8 @@ def init_db():
          conn.execute("ALTER TABLE actions ADD COLUMN scope TEXT NOT NULL DEFAULT 'system'")
       if 'username' not in action_columns:
          conn.execute("ALTER TABLE actions ADD COLUMN username TEXT NOT NULL DEFAULT ''")
+      if 'execution_device_id' not in action_columns:
+         conn.execute("ALTER TABLE actions ADD COLUMN execution_device_id TEXT NOT NULL DEFAULT ''")
       token_columns = {row['name'] for row in conn.execute('PRAGMA table_info(enrollment_tokens)').fetchall()}
       if 'hostname' not in token_columns:
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN hostname TEXT NOT NULL DEFAULT ''")
@@ -549,24 +551,26 @@ def user_heartbeat(token):
 def resolve_devices(target):
    with db() as conn:
       if target == 'all':
-         return conn.execute('SELECT id, hostname FROM devices ORDER BY hostname').fetchall()
+         return conn.execute('''SELECT MIN(id) AS id, hostname FROM devices
+            GROUP BY lower(hostname) ORDER BY hostname''').fetchall()
       if target.startswith('group:'):
          group_name = target.split(':', 1)[1]
          return conn.execute('''
-            SELECT DISTINCT d.id, d.hostname FROM devices d
+            SELECT MIN(d.id) AS id, d.hostname FROM devices d
             JOIN devices grouped_device
                ON lower(grouped_device.hostname)=lower(d.hostname)
             JOIN device_groups g ON g.device_id=grouped_device.id
-            WHERE g.group_name=? ORDER BY d.hostname, d.id
+            WHERE g.group_name=?
+            GROUP BY lower(d.hostname) ORDER BY d.hostname
          ''', (group_name,)).fetchall()
       selected = conn.execute(
          'SELECT hostname FROM devices WHERE id=? OR lower(hostname)=lower(?) LIMIT 1',
          (target, target)).fetchone()
       if not selected:
          return []
-      return conn.execute('''
-         SELECT id, hostname FROM devices WHERE lower(hostname)=lower(?) ORDER BY id
-      ''', (selected['hostname'],)).fetchall()
+      return conn.execute('''SELECT MIN(id) AS id, hostname FROM devices
+         WHERE lower(hostname)=lower(?) AND is_image_source=0 GROUP BY lower(hostname)''',
+         (selected['hostname'],)).fetchall()
 
 
 def queue_action(device_id, capability_id, parameters=None, run_at=None, scope='system', username=''):
@@ -592,16 +596,22 @@ def poll_actions(device_id, token):
    lease = now + ACTION_LEASE
    with db() as conn:
       rows = conn.execute('''
-         SELECT * FROM actions
-         WHERE device_id=? AND scope='system' AND run_at<=? AND (
-            status='queued' OR (status='running' AND COALESCE(lease_until,0)<?)
-         ) ORDER BY run_at, id LIMIT 50
-      ''', (device['id'], horizon, now)).fetchall()
+         SELECT a.* FROM actions a JOIN devices target ON target.id=a.device_id
+         WHERE lower(target.hostname)=lower(?) AND a.scope='system' AND a.run_at<=? AND (
+            (status='queued' AND (a.execution_device_id='' OR a.execution_device_id=?)) OR
+            (status='running' AND COALESCE(lease_until,0)<?)
+         ) ORDER BY run_at, a.id LIMIT 50
+      ''', (device['hostname'], horizon, device['id'], now)).fetchall()
       result = []
       for row in rows:
-         if row['run_at'] <= now:
-            conn.execute('UPDATE actions SET status="running", lease_until=?, started_at=COALESCE(started_at, ?) WHERE id=?',
-                         (lease, now, row['id']))
+         claimed = conn.execute('''UPDATE actions SET status='running', lease_until=?,
+            started_at=COALESCE(started_at, ?), execution_device_id=? WHERE id=? AND
+            ((status='queued' AND (execution_device_id='' OR execution_device_id=?)) OR
+            (status='running' AND COALESCE(lease_until,0)<?))''',
+            (max(lease, row['run_at'] + ACTION_LEASE), now, device['id'], row['id'],
+             device['id'], now))
+         if not claimed.rowcount:
+            continue
          result.append({
             'id': row['id'],
             'capability_id': row['capability_id'],
@@ -619,7 +629,10 @@ def action_result(device_id, token, payload):
    status = 'done' if payload.get('ok', True) else 'failed'
    result = payload.get('result', {})
    with db() as conn:
-      row = conn.execute('SELECT * FROM actions WHERE id=? AND device_id=?', (action_id, device['id'])).fetchone()
+      row = conn.execute('''SELECT a.* FROM actions a JOIN devices target ON target.id=a.device_id
+         WHERE a.id=? AND lower(target.hostname)=lower(?) AND
+         (a.execution_device_id='' OR a.execution_device_id=?)''',
+         (action_id, device['hostname'], device['id'])).fetchone()
       if not row:
          return 404, {'error': 'action not found'}
       conn.execute('UPDATE actions SET status=?, finished_at=?, lease_until=NULL, result_json=? WHERE id=?',
@@ -638,14 +651,17 @@ def poll_user_actions(token):
       return 401, {'error': 'unauthorized'}
    now = now_ts()
    with db() as conn:
+      device = conn.execute('SELECT hostname FROM devices WHERE id=?', (session['device_id'],)).fetchone()
       rows = conn.execute('''
-         SELECT * FROM actions WHERE device_id=? AND scope='user' AND run_at<=? AND
+         SELECT a.* FROM actions a JOIN devices target ON target.id=a.device_id
+         WHERE lower(target.hostname)=lower(?) AND a.scope='user' AND a.run_at<=? AND
             (username='' OR username=?) AND (status='queued' OR
-            (status='running' AND COALESCE(lease_until,0)<?)) ORDER BY run_at,id LIMIT 20
-      ''', (session['device_id'], now, session['username'], now)).fetchall()
+            (status='running' AND COALESCE(lease_until,0)<?)) ORDER BY run_at,a.id LIMIT 20
+      ''', (device['hostname'], now, session['username'], now)).fetchall()
       for row in rows:
-         conn.execute('UPDATE actions SET status="running", lease_until=?, started_at=COALESCE(started_at,?) WHERE id=?',
-                      (now + ACTION_LEASE, now, row['id']))
+         conn.execute('''UPDATE actions SET status='running', lease_until=?,
+            started_at=COALESCE(started_at,?), execution_device_id=? WHERE id=?''',
+            (now + ACTION_LEASE, now, session['device_id'], row['id']))
    return 200, {'actions': [{'id': row['id'], 'capability_id': row['capability_id'],
                              'parameters': json.loads(row['parameters_json'] or '{}')} for row in rows]}
 
@@ -657,8 +673,9 @@ def user_action_result(token, payload):
    with db() as conn:
       action_id = int(payload.get('action_id') or 0)
       if action_id:
-         action = conn.execute("SELECT * FROM actions WHERE id=? AND device_id=? AND scope='user'",
-                               (action_id, session['device_id'])).fetchone()
+         action = conn.execute("""SELECT * FROM actions WHERE id=? AND scope='user'
+            AND (execution_device_id='' OR execution_device_id=?)""",
+            (action_id, session['device_id'])).fetchone()
          if not action or (action['username'] and action['username'] != session['username']):
             return 404, {'error': 'action not found'}
          conn.execute('DELETE FROM actions WHERE id=?', (action_id,))
