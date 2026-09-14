@@ -23,6 +23,8 @@ MAX_REQUEST_BYTES = int(os.environ.get('LCS_MAX_REQUEST_BYTES', str(2 * 1024 * 1
 SOURCE_ROOT = Path(os.environ.get('LCS_SOURCE_ROOT', '/opt/lcs'))
 ADMIN_USERS = {value.strip() for value in os.environ.get('LCS_ADMIN_USERS', '').split(',') if value.strip()}
 
+core.init_db()
+
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
 app.config.update(
    SECRET_KEY=os.environ.get('LCS_SECRET_KEY') or secrets.token_hex(32),
@@ -688,7 +690,6 @@ def create_action():
 
 
 def main():
-   core.init_db()
    RELEASES.mkdir(parents=True, exist_ok=True)
    app.run(host=HOST, port=PORT, threaded=True)
 
