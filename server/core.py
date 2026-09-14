@@ -106,7 +106,10 @@ def init_db():
          created_at INTEGER NOT NULL,
          started_at INTEGER,
          finished_at INTEGER,
-         result_json TEXT
+         result_json TEXT,
+         scope TEXT NOT NULL DEFAULT 'system',
+         username TEXT NOT NULL DEFAULT '',
+         execution_device_id TEXT NOT NULL DEFAULT ''
       );
       CREATE TABLE IF NOT EXISTS events (
          id INTEGER PRIMARY KEY AUTOINCREMENT,
