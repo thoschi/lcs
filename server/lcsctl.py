@@ -21,7 +21,7 @@ if ENV_FILE.exists():
 
 from core import DB_PATH, SESSION_TTL, add_enrollment_token, create_reenrollment_token, delete_device_data, enrollment_settings, init_db, password_hash, queue_action, resolve_devices, token_hash
 
-MANIFEST = Path(os.environ.get('LCS_MANIFEST_FILE', str(BASE / 'bootstrap-manifest.json')))
+MANIFEST = Path(os.environ.get('LCS_MANIFEST_FILE', str(BASE / 'data/bootstrap-manifest.json')))
 RELEASES = Path(os.environ.get('LCS_RELEASES_DIR', str(BASE / 'releases')))
 
 
