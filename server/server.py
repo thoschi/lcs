@@ -408,7 +408,7 @@ def admin_logging():
 @app.get('/admin/client-status')
 @admin_required
 def client_status():
-   devices, _, _, _, _, _ = dashboard_data()
+   devices, _, _, _, actions, _ = dashboard_data()
    return jsonify(devices=[{
       'id': item['id'],
       'online': item['online'],
@@ -420,7 +420,17 @@ def client_status():
       'groups': item['groups'] or '',
       'hardware': item['hardware'],
       'is_image_source': bool(item.get('is_image_source')),
-   } for item in devices], now=core.now_ts())
+   } for item in devices], actions=[{
+      'id': item['id'],
+      'hostname': item['hostname'],
+      'capability_id': item['capability_id'],
+      'status': item['status'],
+      'run_at': item['run_at'],
+      'finished_at': item['finished_at'],
+      'result': json.loads(item['result_json']) if item['result_json'] else None,
+      'execution_device_id': item['executed_device_id'] or '',
+      'execution_platform': item['execution_platform'] or '',
+   } for item in actions], now=core.now_ts())
 
 
 @app.post('/admin/group')
