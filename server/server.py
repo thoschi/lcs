@@ -236,11 +236,21 @@ def audit_data():
 
 def render_admin(new_token=None, editor=None, page='overview'):
    devices, groups, assignments, tokens, actions, template_tree = dashboard_data()
+   task_devices = []
+   for item in (device for device in devices if not device['is_image_source']):
+      existing = next((device for device in task_devices
+                       if device['hostname'].lower() == item['hostname'].lower()), None)
+      if existing:
+         existing['connection_count'] += 1
+      else:
+         target = dict(item)
+         target['connection_count'] = 1
+         task_devices.append(target)
    logs, histories = audit_data() if page == 'logging' else ([], [])
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=load_manifest(),
                           now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
-                          page=page, logs=logs, histories=histories)
+                          task_devices=task_devices, page=page, logs=logs, histories=histories)
 
 
 @app.get('/health')

@@ -451,7 +451,13 @@ def heartbeat(device_id, token, payload):
 
 def groups_for_device(device_id):
    with db() as conn:
-      rows = conn.execute('SELECT group_name FROM device_groups WHERE device_id=? ORDER BY group_name', (device_id,)).fetchall()
+      rows = conn.execute('''
+         SELECT DISTINCT dg.group_name FROM device_groups dg
+         JOIN devices grouped_device ON grouped_device.id=dg.device_id
+         JOIN devices requested_device
+            ON lower(requested_device.hostname)=lower(grouped_device.hostname)
+         WHERE requested_device.id=? ORDER BY dg.group_name
+      ''', (device_id,)).fetchall()
    return [row['group_name'] for row in rows]
 
 
@@ -459,11 +465,15 @@ def capability_assignment_for_device(device_id, capability_id):
    groups = groups_for_device(device_id)
    with db() as conn:
       direct = conn.execute('''
-         SELECT enabled, execution FROM capability_assignments
-         WHERE capability_id=? AND target_type='device' AND target_id=?
-      ''', (capability_id, device_id)).fetchone()
-      if direct is not None:
-         return dict(direct)
+         SELECT ca.enabled, ca.execution FROM capability_assignments ca
+         JOIN devices assigned_device ON assigned_device.id=ca.target_id
+         JOIN devices requested_device
+            ON lower(requested_device.hostname)=lower(assigned_device.hostname)
+         WHERE ca.capability_id=? AND ca.target_type='device' AND requested_device.id=?
+         ORDER BY ca.enabled
+      ''', (capability_id, device_id)).fetchall()
+      if direct:
+         return dict(direct[0])
 
       device = conn.execute('SELECT template_device_id FROM devices WHERE id=?', (device_id,)).fetchone()
       if device and device['template_device_id']:
@@ -543,12 +553,20 @@ def resolve_devices(target):
       if target.startswith('group:'):
          group_name = target.split(':', 1)[1]
          return conn.execute('''
-            SELECT d.id, d.hostname FROM devices d
-            JOIN device_groups g ON g.device_id=d.id
-            WHERE g.group_name=? ORDER BY d.hostname
+            SELECT DISTINCT d.id, d.hostname FROM devices d
+            JOIN devices grouped_device
+               ON lower(grouped_device.hostname)=lower(d.hostname)
+            JOIN device_groups g ON g.device_id=grouped_device.id
+            WHERE g.group_name=? ORDER BY d.hostname, d.id
          ''', (group_name,)).fetchall()
-      row = conn.execute('SELECT id, hostname FROM devices WHERE id=? OR hostname=?', (target, target)).fetchone()
-      return [row] if row else []
+      selected = conn.execute(
+         'SELECT hostname FROM devices WHERE id=? OR lower(hostname)=lower(?) LIMIT 1',
+         (target, target)).fetchone()
+      if not selected:
+         return []
+      return conn.execute('''
+         SELECT id, hostname FROM devices WHERE lower(hostname)=lower(?) ORDER BY id
+      ''', (selected['hostname'],)).fetchall()
 
 
 def queue_action(device_id, capability_id, parameters=None, run_at=None, scope='system', username=''):
