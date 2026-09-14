@@ -385,6 +385,7 @@ install_server() {
       -exec rm -rf {} +
    cp "$SOURCE_ROOT/server/core.py" "$LCS_SERVER_ROOT/"
    cp "$SOURCE_ROOT/server/server.py" "$LCS_SERVER_ROOT/"
+   cp "$SOURCE_ROOT/server/gunicorn.conf.py" "$LCS_SERVER_ROOT/"
    cp "$SOURCE_ROOT/server/lcsctl.py" "$LCS_SERVER_ROOT/"
    cp "$SOURCE_ROOT/server/requirements.txt" "$LCS_SERVER_ROOT/"
    cp "$SOURCE_ROOT/server/server.env.example" "$LCS_SERVER_ROOT/"

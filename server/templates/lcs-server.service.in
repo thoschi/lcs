@@ -10,9 +10,10 @@ Group=@SERVER_USER@
 WorkingDirectory=@SERVER_ROOT@
 EnvironmentFile=@SERVER_ENV@
 Environment=LCS_SERVER_ENV=@SERVER_ENV@
-ExecStart=@SERVER_ROOT@/venv/bin/python @SERVER_ROOT@/server.py
+ExecStart=@SERVER_ROOT@/venv/bin/gunicorn --config @SERVER_ROOT@/gunicorn.conf.py server:app
 Restart=always
 RestartSec=5
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target
