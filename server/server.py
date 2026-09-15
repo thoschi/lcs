@@ -4,6 +4,7 @@ import secrets
 import time
 import tarfile
 import hashlib
+import io
 import zipfile
 from functools import wraps
 from pathlib import Path
@@ -254,8 +255,30 @@ def render_admin(new_token=None, editor=None, page='overview'):
          target['connections'] = [item]
          task_devices.append(target)
    logs, histories = audit_data() if page == 'logging' else ([], [])
+   device_by_id = {item['id']: item for item in devices}
+   for token in tokens:
+      token['clients'] = [item for item in devices if
+         (token['token_type'] == 'template' and (item['id'] == token['template_device_id'] or
+          item.get('template_device_id') == token['template_device_id'])) or
+         (token['token_type'] != 'template' and token['group_name'] in (item.get('groups') or '').split(', '))]
+   manifest = load_manifest()
+   generation = int(manifest.get('generation', 0))
+   for capability in manifest.get('capabilities', []):
+      installed, pending = [], []
+      for assignment in (item for item in assignments if item['capability_id'] == capability['id'] and item['enabled']):
+         targets = devices if assignment['target_type'] == 'all' else (
+            [device_by_id[assignment['target_id']]] if assignment['target_type'] in ('device', 'template') and assignment['target_id'] in device_by_id else
+            [item for item in devices if assignment['target_type'] == 'group' and assignment['target_id'] in (item.get('groups') or '').split(', ')])
+         for target in targets:
+            bucket = installed if int(target.get('stack_generation') or 0) >= generation else pending
+            if target not in bucket:
+               bucket.append(target)
+      capability['installed_clients'], capability['pending_clients'] = installed, pending
+   for device in devices:
+      device['pending_task_count'] = sum(device in capability['pending_clients']
+                                         for capability in manifest.get('capabilities', []))
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
-                          tokens=tokens, actions=actions, manifest=load_manifest(),
+                          tokens=tokens, actions=actions, manifest=manifest,
                           now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
                           task_devices=task_devices, page=page, logs=logs, histories=histories)
 
@@ -558,6 +581,20 @@ def copy_token(token_id):
    return jsonify(token=token['token_value'])
 
 
+@app.get('/admin/token/<int:token_id>/download')
+@admin_required
+def download_token(token_id):
+   with core.db() as conn:
+      token = conn.execute('SELECT name, token_value FROM enrollment_tokens WHERE id=?', (token_id,)).fetchone()
+   if not token:
+      abort(404)
+   if not token['token_value']:
+      abort(409, 'Für diesen älteren Token ist keine Token-Datei verfügbar')
+   safe_name = ''.join(char if char.isalnum() or char in '-_' else '-' for char in token['name']).strip('-') or 'enrollment'
+   return send_file(io.BytesIO((token['token_value'] + '\n').encode()), mimetype='text/plain',
+                    as_attachment=True, download_name=safe_name + '.token')
+
+
 @app.post('/admin/token/<int:token_id>/delete')
 @admin_required
 def delete_token(token_id):
@@ -657,7 +694,8 @@ def save_assignment():
           request.form.get('execution', 'manual')))
    bump_generation()
    flash('Capability-Zuordnung gespeichert.', 'success')
-   return redirect(url_for('admin_tasks') + '#capabilities')
+   destination = url_for('admin_clients') + '#devices' if request.form.get('next') == 'clients' else url_for('admin_tasks')
+   return redirect(destination)
 
 
 @app.post('/admin/action')
@@ -688,8 +726,9 @@ def create_action():
                   VALUES(?, 'group', ?, 1) ON CONFLICT(capability_id, target_type, target_id)
                   DO UPDATE SET enabled=1''', (capability_id, group_name))
          bump_generation()
+      run_at = int(request.form.get('run_at') or time.time())
       for target_device in devices:
-         core.queue_action(target_device['id'], capability_id, parameters, int(time.time()),
+         core.queue_action(target_device['id'], capability_id, parameters, run_at,
                            scope, username)
    except (ValueError, json.JSONDecodeError) as exc:
       flash(str(exc), 'error')
