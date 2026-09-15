@@ -198,7 +198,53 @@
       }
    };
 
+   const logTable = document.querySelector('#log-table');
+   const logBody = logTable?.tBodies[0];
+   const logRows = () => logBody ? [...logBody.querySelectorAll('tr[data-log]')] : [];
+   const selectedAspects = new Set(['registration', 'token', 'action']);
+   const applyLogView = () => {
+      if (!logTable) return;
+      const terms = document.querySelector('#log-search').value.trim().toLocaleLowerCase('de-DE').split(/\s+/).filter(Boolean);
+      const client = document.querySelector('#log-client').value;
+      const action = document.querySelector('#log-action').value;
+      let visible = 0;
+      logRows().forEach(row => {
+         const show = selectedAspects.has(row.dataset.aspect) && (!client || row.dataset.client === client) &&
+            (!action || row.dataset.action === action) && terms.every(term => row.dataset.search.includes(term));
+         row.hidden = !show;
+         if (show) visible += 1;
+      });
+      document.querySelector('#log-result-count').textContent = `${visible} von ${logRows().length} Einträgen`;
+   };
+   document.querySelector('#log-search')?.addEventListener('input', applyLogView);
+   document.querySelector('#log-client')?.addEventListener('change', applyLogView);
+   document.querySelector('#log-action')?.addEventListener('change', applyLogView);
+   document.querySelector('#log-aspects')?.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      button.classList.toggle('active');
+      button.setAttribute('aria-pressed', String(button.classList.contains('active')));
+      if (button.classList.contains('active')) selectedAspects.add(button.dataset.value);
+      else selectedAspects.delete(button.dataset.value);
+      applyLogView();
+   });
+   document.querySelectorAll('.log-sort').forEach(button => button.addEventListener('click', () => {
+      const wasAscending = button.getAttribute('aria-sort') === 'ascending';
+      const ascending = button.classList.contains('active') ? !wasAscending : button.dataset.sort !== 'timestamp';
+      logRows().sort((left, right) => {
+         const a = left.dataset[button.dataset.sort];
+         const b = right.dataset[button.dataset.sort];
+         const result = button.dataset.sort === 'timestamp' ? Number(a) - Number(b) : a.localeCompare(b, 'de');
+         return ascending ? result : -result;
+      }).forEach(row => logBody.appendChild(row));
+      document.querySelectorAll('.log-sort').forEach(item => {
+         item.classList.toggle('active', item === button);
+         item.setAttribute('aria-sort', item === button ? (ascending ? 'ascending' : 'descending') : 'none');
+      });
+   }));
+
    applyView();
+   applyLogView();
    if (table || document.querySelector('#action-table')) {
       updateStatus();
       setInterval(updateStatus, 5000);
