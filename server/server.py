@@ -239,17 +239,30 @@ def dashboard_data():
 
 def audit_data():
    with core.db() as conn:
-      logs = [dict(row) for row in conn.execute('''
+      audits = [dict(row) for row in conn.execute('''
          SELECT * FROM device_audit_log ORDER BY created_at DESC, id DESC
       ''').fetchall()]
-      histories = [dict(row) for row in conn.execute('''
-         SELECT device_id, MAX(hostname) AS hostname,
-            SUM(CASE WHEN event_type IN ('registered', 'reregistered') THEN 1 ELSE 0 END) AS registration_count,
-            SUM(CASE WHEN event_type='token_changed' THEN 1 ELSE 0 END) AS token_change_count,
-            MAX(created_at) AS last_event
-         FROM device_audit_log GROUP BY device_id ORDER BY hostname
+      action_rows = [dict(row) for row in conn.execute('''
+         SELECT a.*, COALESCE(d.hostname,
+            (SELECT MAX(l.hostname) FROM device_audit_log l WHERE l.device_id=a.device_id),
+            a.device_id) AS hostname
+         FROM actions a LEFT JOIN devices d ON d.id=a.device_id
       ''').fetchall()]
-   return logs, histories
+   labels = {'registered': 'Registrierung', 'reregistered': 'Neuregistrierung',
+             'token_changed': 'Token geändert'}
+   entries = [{
+      **item, 'key': 'audit-%s' % item['id'],
+      'aspect': 'token' if item['event_type'] == 'token_changed' else 'registration',
+      'action': labels.get(item['event_type'], item['event_type']),
+      'status': '', 'result_json': '', 'timestamp': item['created_at'],
+   } for item in audits]
+   entries.extend({
+      **item, 'key': 'action-%s' % item['id'], 'aspect': 'action',
+      'action': item['capability_id'], 'event_type': 'action',
+      'old_token_hash': '', 'new_token_hash': '', 'timestamp': item['created_at'],
+   } for item in action_rows)
+   entries.sort(key=lambda item: (item['timestamp'], item['key']), reverse=True)
+   return entries
 
 
 def render_admin(new_token=None, editor=None, page='overview'):
@@ -266,7 +279,7 @@ def render_admin(new_token=None, editor=None, page='overview'):
          target['connection_count'] = 1
          target['connections'] = [item]
          task_devices.append(target)
-   logs, histories = audit_data() if page == 'logging' else ([], [])
+   logs = audit_data() if page == 'logging' else []
    device_by_id = {item['id']: item for item in devices}
    for token in tokens:
       token['clients'] = [item for item in devices if
@@ -325,7 +338,7 @@ def render_admin(new_token=None, editor=None, page='overview'):
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=manifest,
                           now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
-                          task_devices=task_devices, page=page, logs=logs, histories=histories, all_group=all_group)
+                          task_devices=task_devices, page=page, logs=logs, all_group=all_group)
 
 
 @app.get('/health')
@@ -784,7 +797,7 @@ def create_action():
    else:
       flash('%d Aktion(en) eingeplant%s.' % (len(devices),
             ' und für neue Gruppenmitglieder vorgemerkt' if remember else ''), 'success')
-   return redirect(url_for('admin_tasks') + '#actions')
+   return redirect(url_for('admin_logging'))
 
 
 def main():
