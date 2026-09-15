@@ -668,23 +668,6 @@ def delete_token(token_id):
    return redirect(url_for('admin_tokens') + '#tokens')
 
 
-@app.post('/admin/capability/<capability_id>')
-@admin_required
-def edit_capability(capability_id):
-   check_csrf()
-   payload = load_manifest()
-   cap = next((item for item in payload.get('capabilities', []) if item.get('id') == capability_id), None)
-   if not cap:
-      abort(404)
-   cap['title'] = request.form.get('title', '').strip() or capability_id
-   cap['description'] = request.form.get('description', '').strip()
-   cap['timeout'] = max(1, int(request.form.get('timeout', 120)))
-   cap['user_executable'] = request.form.get('user_executable') == '1'
-   bump_generation(payload)
-   flash('Capability aktualisiert.', 'success')
-   return redirect(url_for('admin_tasks') + '#capabilities')
-
-
 @app.post('/admin/capability-editor')
 @admin_required
 def capability_editor():

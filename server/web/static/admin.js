@@ -30,8 +30,7 @@
    const table = document.querySelector('#client-table');
    const body = table?.tBodies[0];
    const search = document.querySelector('#client-search');
-   const platform = document.querySelector('#platform-filter');
-   const deviceType = document.querySelector('#client-type-filter');
+   const filters = {entryType: '', platform: ''};
    const count = document.querySelector('#client-result-count');
    let sortKey = 'hostname';
    let sortAscending = true;
@@ -44,8 +43,8 @@
       let visible = 0;
       rows().forEach(row => {
          const show = terms.every(term => row.dataset.search.includes(term)) &&
-            (!platform.value || row.dataset.platform.toLocaleLowerCase('de-DE') === platform.value.toLocaleLowerCase('de-DE')) &&
-            (!deviceType.value || row.dataset.entryType === deviceType.value);
+            (!filters.platform || row.dataset.platform.toLocaleLowerCase('de-DE') === filters.platform.toLocaleLowerCase('de-DE')) &&
+            (!filters.entryType || row.dataset.entryType === filters.entryType);
          row.hidden = !show;
          if (show) visible += 1;
       });
@@ -64,8 +63,16 @@
    };
 
    search?.addEventListener('input', applyView);
-   platform?.addEventListener('change', applyView);
-   deviceType?.addEventListener('change', applyView);
+   document.querySelectorAll('.filter-buttons').forEach(group => group.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      filters[group.dataset.filter] = button.dataset.value;
+      group.querySelectorAll('button').forEach(item => {
+         item.classList.toggle('active', item === button);
+         item.setAttribute('aria-pressed', String(item === button));
+      });
+      applyView();
+   }));
    document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => {
       sortRows(button.dataset.sort);
       document.querySelectorAll('.sort-button').forEach(item => {
