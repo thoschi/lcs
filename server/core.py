@@ -341,9 +341,8 @@ def enroll(payload):
       if reusable['token_type'] == 'template' and reusable['template_device_id']:
          existing = conn.execute('''
          SELECT id, hostname, settings_json, template_device_id, is_image_source, token_hash
-         FROM devices WHERE lower(hostname)=lower(?) AND
-            (id=? OR template_device_id=?)
-         ''', (hostname, reusable['template_device_id'], reusable['template_device_id'])).fetchone()
+         FROM devices WHERE lower(hostname)=lower(?) AND template_device_id=?
+         ''', (hostname, reusable['template_device_id'])).fetchone()
       device_id = existing['id'] if existing else secrets.token_hex(8)
       registered_hostname = existing['hostname'] if existing else hostname
       settings_json = (existing['settings_json'] if existing else
