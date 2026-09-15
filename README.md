@@ -146,6 +146,11 @@ kann jedes Masterimage einen eigenen Token erhalten. Wird ein Image ausgemustert
 oder ein Token kompromittiert, lässt sich nur dieser Token widerrufen; bereits
 enrollte Clients behalten ihre Geräteidentität.
 
+Für Laufzeitumgebungen wie LINBO kann stattdessen ein wiederverwendbarer
+Client-Token angelegt werden. Jedes Gerät mit diesem identischen Token wird direkt
+als fertiger Client registriert und Mitglied der zugehörigen Enrollment-Gruppe;
+ein Musterclient wird dabei nicht erzeugt.
+
 Alternativ steht die lokale Server-CLI zur Verfügung:
 
 ```bash

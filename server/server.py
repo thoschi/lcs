@@ -627,8 +627,8 @@ def create_token():
          request.form.get('user_data', ''), request.form.get('use_domain_username') == '1',
          request.form.get('password_username', ''))
       token = core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
-                                        request.form.get('token_type', 'template') == 'template', settings=settings,
-                                        hostname=request.form.get('hostname', ''))
+                                        settings=settings, hostname=request.form.get('hostname', ''),
+                                        token_type=request.form.get('token_type', 'template'))
    except Exception as exc:
       flash(str(exc), 'error')
       return redirect(url_for('admin_tokens') + '#tokens')
