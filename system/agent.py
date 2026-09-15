@@ -57,11 +57,16 @@ def runtime_paths(config):
    }
 
 
-def user_profile_path(config):
-   local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+def user_data_path(config, username=''):
+   local_username = username or config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
    default = (str(Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username / 'AppData' / 'Roaming' / 'LCS')
               if os.name == 'nt' else '/home/%s/.config/lcs' % local_username)
-   root = Path(config.get('LCS_USER_DATA', default)).expanduser()
+   configured = config.get('LCS_USER_DATA', default)
+   return Path(configured.replace('${username}', local_username).replace('$username', local_username)).expanduser()
+
+
+def user_profile_path(config, username=''):
+   root = user_data_path(config, username)
    platform = 'windows' if os.name == 'nt' else 'linux'
    return root / ('credentials-' + platform + '.json')
 
@@ -72,18 +77,18 @@ def system_marker_path(config):
    return Path(config.get('LCS_SYSTEM_MARKER', default))
 
 
-def user_marker_path(config):
+def user_marker_path(config, username=''):
    platform = 'windows' if os.name == 'nt' else 'linux'
-   return user_profile_path(config).with_name('system-marker-' + platform)
+   return user_profile_path(config, username).with_name('system-marker-' + platform)
 
 
-def initialization_status(config):
+def initialization_status(config, local_username=''):
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       return {'profile_exists': False, 'username': '', 'initialization_required': False,
               'password_required': False, 'domain_username': True}
-   profile = load_json(user_profile_path(config), {})
+   profile = load_json(user_profile_path(config, local_username), {})
    try:
-      user_marker = user_marker_path(config).read_text(encoding='utf-8').strip()
+      user_marker = user_marker_path(config, local_username).read_text(encoding='utf-8').strip()
       system_marker = system_marker_path(config).read_text(encoding='utf-8').strip()
    except Exception:
       user_marker = system_marker = ''
@@ -148,10 +153,10 @@ def disable_autologin():
    log('Autologin wurde deaktiviert', configurations=changed)
 
 
-def initialize_user(config, username='', password='', force=False):
-   profile_path = user_profile_path(config)
+def initialize_user(config, username='', password='', force=False, client_username=''):
+   profile_path = user_profile_path(config, client_username)
    local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
-   status = initialization_status(config)
+   status = initialization_status(config, client_username)
    profile = load_json(profile_path, {})
    log('Benutzereinrichtung geprüft', initialization_required=status['initialization_required'],
        profile_exists=status['profile_exists'], local_username=local_username)
@@ -181,7 +186,7 @@ def initialize_user(config, username='', password='', force=False):
       stored['shadow'] = shadow_entry(local_username)
    save_json(profile_path, stored, 0o600)
    marker = os.urandom(24).hex()
-   user_marker_path(config).write_text(marker + '\n', encoding='utf-8')
+   user_marker_path(config, client_username).write_text(marker + '\n', encoding='utf-8')
    system_marker = system_marker_path(config)
    system_marker.parent.mkdir(parents=True, exist_ok=True)
    system_marker.write_text(marker + '\n', encoding='utf-8')
@@ -199,7 +204,7 @@ def handle_user_request(config, runtime, request, peer_username=''):
    operation = request.get('operation')
    domain_username = peer_username or str(request.get('local_username', '')).strip()
    if operation == 'status':
-      status = initialization_status(config)
+      status = initialization_status(config, domain_username)
       if status.get('domain_username'):
          status['username'] = domain_username
       return {'ok': True, 'client_enabled': runtime.get('client_enabled', False),
@@ -209,7 +214,8 @@ def handle_user_request(config, runtime, request, peer_username=''):
    if operation == 'initialize':
       if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
          return {'ok': True, 'username': domain_username}
-      return initialize_user(config, str(request.get('username', '')).strip(), str(request.get('password', '')))
+      return initialize_user(config, str(request.get('username', '')).strip(),
+                             str(request.get('password', '')), client_username=domain_username)
    if operation == 'capabilities':
       return {'ok': True, 'capabilities': user_capabilities(runtime['stack'])}
    if operation == 'execute':
@@ -228,7 +234,7 @@ def handle_user_request(config, runtime, request, peer_username=''):
       else:
          import pwd
          user_home = Path(pwd.getpwnam(local_username).pw_dir)
-      data_path = (Path(config['LCS_USER_DATA']).expanduser() if config.get('LCS_USER_DATA') else
+      data_path = (user_data_path(config, domain_username) if config.get('LCS_USER_DATA') else
                    (user_home / 'AppData' / 'Roaming' / 'LCS' if os.name == 'nt' else
                     user_home / '.config' / 'lcs'))
       result = run_capability(cap, {}, timeout=int(cap.get('timeout', 120)),
