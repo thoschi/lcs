@@ -1,5 +1,6 @@
 import json
 import os
+import platform
 import re
 import socket
 import struct
@@ -18,7 +19,7 @@ sys.path.insert(0, str(BASE))
 from capability_runtime import capability_map, load_stack, run_capability, sync_stack
 from common.config import env_bool, load_env
 from common.http_client import request_json
-from common.platform_info import hardware_info, logged_in_users
+from common.platform_info import hostname, logged_in_users
 
 VERSION = '0.6.0'
 
@@ -390,16 +391,16 @@ def read_enrollment_token(config):
 
 
 def enroll(config, state_dir):
-   info = hardware_info()
+   current_hostname = hostname()
    enrollment_token, token_path = read_enrollment_token(config)
-   log('Registrierung gestartet', hostname=info['hostname'], token_file=str(token_path))
+   log('Registrierung gestartet', hostname=current_hostname, token_file=str(token_path))
    if not enrollment_token:
       raise RuntimeError('Enrollment token missing: %s' % token_path)
    log('Enrollment-Token geladen', token_file=str(token_path))
    payload = {
       'enrollment_token': enrollment_token,
-      'hostname': info['hostname'],
-      'platform': info['platform'],
+      'hostname': current_hostname,
+      'platform': platform.system().lower(),
       'agent_version': VERSION,
    }
    status, response = request_json(
@@ -413,10 +414,10 @@ def enroll(config, state_dir):
    for key in ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME'):
       if response.get('settings', {}).get(key):
          config[key] = str(response['settings'][key])
-   registered_hostname = str(response.get('hostname') or info['hostname'])
+   registered_hostname = str(response.get('hostname') or current_hostname)
    restart_required = False
-   if registered_hostname.lower() != info['hostname'].lower():
-      log('Hostname wird wiederhergestellt', current=info['hostname'], registered=registered_hostname)
+   if registered_hostname.lower() != current_hostname.lower():
+      log('Hostname wird wiederhergestellt', current=current_hostname, registered=registered_hostname)
       restart_required = set_hostname(registered_hostname)
    state = {'device_id': response['device_id'], 'device_token': response['device_token'],
             'hostname': registered_hostname, 'image_source': bool(response.get('image_source'))}
@@ -472,7 +473,7 @@ def set_hostname(hostname):
 def heartbeat(config, state, stack):
    payload = {
       'agent_version': VERSION,
-      'hardware': hardware_info(),
+      'hostname': hostname(),
       'logged_in_users': logged_in_users(),
       'stack_generation': int(stack.get('generation', 0)),
    }

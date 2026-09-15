@@ -1,19 +1,11 @@
 {
   "id": "inventory",
-  "version": "1.0.0",
-  "title": "Inventardaten erfassen",
-  "description": "Meldet Seriennummer, MAC-Adressen und installierte Pakete.",
+  "version": "2.0.0",
+  "title": "Client-Basisinfos (vollständig)",
+  "description": "Befüllt den Info-Block mit Netzwerk-, Hardware-, Betriebssystem- und Softwaredaten. Der Python-Code kann für herstellerspezifische Abfragen angepasst werden.",
   "scope": "system",
   "tags": [],
   "timeout": 120,
-  "triggers": [
-    {
-      "type": "startup"
-    },
-    {
-      "type": "interval",
-      "seconds": 21600
-    }
-  ],
+  "triggers": [{"type": "startup"}, {"type": "interval", "seconds": 21600}],
   "entrypoint": "action.py"
 }

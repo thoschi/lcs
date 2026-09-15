@@ -435,19 +435,17 @@ def heartbeat(device_id, token, payload):
    device = authenticate_device(device_id, token)
    if not device:
       return 401, {'error': 'unauthorized'}
-   hardware = payload.get('hardware', {})
-   hostname = str(hardware.get('hostname') or device['hostname'])
+   hostname = str(payload.get('hostname') or payload.get('hardware', {}).get('hostname') or device['hostname'])
    with db() as conn:
       conn.execute('''UPDATE enrollment_tokens SET template_device_id=?
          WHERE enabled=1 AND token_type='template' AND template_device_id=''
             AND hostname<>'' AND lower(hostname)=lower(?)''', (device['id'], hostname))
       image_source = _device_is_template(conn, device['id'], hostname)
       conn.execute('''
-         UPDATE devices SET last_seen=?, hostname=?, agent_version=?, hardware_json=?,
+         UPDATE devices SET last_seen=?, hostname=?, agent_version=?,
             logged_in_users_json=?, stack_generation=?, is_image_source=? WHERE id=?
       ''', (
          now_ts(), hostname, payload.get('agent_version', ''),
-         json.dumps(hardware, ensure_ascii=False),
          json.dumps(payload.get('logged_in_users', []), ensure_ascii=False),
          int(payload.get('stack_generation', 0)), int(image_source), device['id']))
    return 200, {'ok': True, 'role': 'template' if image_source else 'client',
@@ -640,6 +638,10 @@ def action_result(device_id, token, payload):
          return 404, {'error': 'action not found'}
       conn.execute('UPDATE actions SET status=?, finished_at=?, lease_until=NULL, result_json=? WHERE id=?',
                    (status, now_ts(), json.dumps(result, ensure_ascii=False), action_id))
+      client_info = result.get('client_info') if isinstance(result, dict) else None
+      if status == 'done' and isinstance(client_info, dict):
+         conn.execute('UPDATE devices SET hardware_json=? WHERE id=?',
+                      (json.dumps(client_info, ensure_ascii=False), device['id']))
       log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
       if row['capability_id'] == '__lcs_reset_device__' and status == 'done':
          # Die Registrierung bleibt erhalten; nur die zurückgesetzte lokale
@@ -701,8 +703,13 @@ def device_event(device_id, token, payload):
    if not device:
       return 401, {'error': 'unauthorized'}
    with db() as conn:
+      result = payload.get('payload', {})
+      client_info = result.get('client_info') if isinstance(result, dict) else None
+      if payload.get('event_type') == 'scheduled_result' and isinstance(client_info, dict):
+         conn.execute('UPDATE devices SET hardware_json=? WHERE id=?',
+                      (json.dumps(client_info, ensure_ascii=False), device['id']))
       log_event(conn, device['id'], '', 'system', str(payload.get('event_type', 'event')),
-                str(payload.get('capability_id', '')), payload.get('payload', {}))
+                str(payload.get('capability_id', '')), result)
    return 200, {'ok': True}
 
 
