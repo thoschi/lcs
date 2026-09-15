@@ -282,9 +282,11 @@ def render_admin(new_token=None, editor=None, page='overview'):
    logs = audit_data() if page == 'logging' else []
    device_by_id = {item['id']: item for item in devices}
    for token in tokens:
+      token['template'] = device_by_id.get(token['template_device_id'])
       token['clients'] = [item for item in devices if
-         (token['token_type'] == 'template' and (item['id'] == token['template_device_id'] or
-          item.get('template_device_id') == token['template_device_id'])) or
+         (token['token_type'] == 'template' and token['template_device_id'] and
+          item.get('template_device_id') == token['template_device_id'] and
+          item['id'] != token['template_device_id']) or
          (token['token_type'] != 'template' and token['group_name'] in (item.get('groups') or '').split(', '))]
    manifest = load_manifest()
    generation = int(manifest.get('generation', 0))
