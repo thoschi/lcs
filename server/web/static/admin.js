@@ -197,11 +197,16 @@
                }
                Object.assign(row.dataset, {status: device.online ? '1' : '0', hostname: device.hostname.toLowerCase(), platform: device.platform,
                   agent: device.agent_version.toLowerCase(), last_seen: String(device.last_seen), search: JSON.stringify(device).toLowerCase()});
-               document.querySelectorAll(`[data-status-device-id="${CSS.escape(device.id)}"]`).forEach(dot => dot.classList.toggle('online', device.online));
-               document.querySelectorAll(`[data-last-seen-device-id="${CSS.escape(device.id)}"]`).forEach(element => { element.textContent = device.last_seen_text; });
             });
             applyView();
          }
+         data.devices.forEach(device => {
+            document.querySelectorAll(`[data-status-device-id="${CSS.escape(device.id)}"]`).forEach(dot => dot.classList.toggle('online', device.online));
+            document.querySelectorAll(`[data-online-label-device-id="${CSS.escape(device.id)}"]`).forEach(element => {
+               element.textContent = `${element.textContent.split(' · ')[0]} · ${device.online ? 'online' : 'offline'}`;
+            });
+            document.querySelectorAll(`[data-last-seen-device-id="${CSS.escape(device.id)}"]`).forEach(element => { element.textContent = device.last_seen_text; });
+         });
          updateActions(data.actions);
          indicators.forEach(indicator => { indicator.textContent = `Zuletzt aktualisiert: ${new Date().toLocaleTimeString('de-DE')}`; });
       } catch (error) {
@@ -260,7 +265,7 @@
 
    applyView();
    applyLogView();
-   if (table || document.querySelector('#action-table')) {
+   if (table || document.querySelector('#action-table') || document.querySelector('[data-status-device-id]')) {
       updateStatus();
       setInterval(updateStatus, 5000);
    }
