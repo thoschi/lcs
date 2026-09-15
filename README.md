@@ -221,8 +221,10 @@ LCS_STATE_ROOT=/opt/mein-lcs-service/state \
 
 Wichtige Variablen sind `LCS_SERVER_ROOT`, `LCS_SERVICE_ROOT`, `LCS_CLIENT_ROOT`, `LCS_STATE_ROOT`, `LCS_FEATURE_ROOT`, `LCS_SERVER_ENV`, `LCS_CLIENT_ENV` und `LCS_ENROLLMENT_TOKEN`.
 
-`LCS_USER_DATA` bezeichnet genau einen Nutzerspeicher; es gibt keine Unterordner
-für verschiedene Benutzer. Standard ist `/home/nutzer/.config/lcs`. Bei der ersten
+`LCS_USER_DATA` bezeichnet den Nutzerspeicher. Darin können `$username` oder
+`${username}` für den Namen des angemeldeten lokalen Benutzers verwendet werden,
+beispielsweise `/home/$username/.config/lcs`. Ohne Platzhalter gibt es keine automatisch
+erzeugten Unterordner für verschiedene Benutzer. Standard ist `/home/nutzer/.config/lcs`. Bei der ersten
 Anmeldung fragt der Client Benutzername und Passwort mit Wiederholung ab. Er übergibt
 die Eingaben nur über den lokalen Unix-Socket (unter Windows über die lokale Named Pipe
 `\\.\pipe\lcs-user`) an den Systemdienst.

@@ -248,7 +248,10 @@ def main():
       if status.get('domain_username'):
          default_data = (Path.home() / 'AppData' / 'Roaming' / 'LCS' if os.name == 'nt' else
                          Path.home() / '.config' / 'lcs')
-         Path(config.get('LCS_USER_DATA', default_data)).expanduser().mkdir(parents=True, exist_ok=True)
+         configured = str(config.get('LCS_USER_DATA', default_data))
+         username = getpass.getuser()
+         Path(configured.replace('${username}', username).replace('$username', username)).expanduser().mkdir(
+            parents=True, exist_ok=True)
       if '--cli' in sys.argv:
          return run_cli(config)
       return run_gui(config, status)
