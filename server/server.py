@@ -301,6 +301,7 @@ def render_admin(new_token=None, editor=None, page='overview'):
       capability['installed_clients'], capability['pending_clients'] = installed, pending
    for device in devices:
       device['capability_states'] = []
+      device['executable_capabilities'] = []
       for capability in manifest.get('capabilities', []):
          assigned = core.capability_enabled_for_device(device['id'], capability['id'])
          installed = device in capability['installed_clients']
@@ -308,6 +309,11 @@ def render_admin(new_token=None, editor=None, page='overview'):
             'id': capability['id'], 'title': capability['title'],
             'assigned': assigned, 'installed': assigned and installed,
          })
+         if assigned and capability.get('scope', 'system') == 'system':
+            device['executable_capabilities'].append({
+               'id': capability['id'], 'title': capability['title'],
+               'parameters': capability.get('parameter_example') or {},
+            })
       device['pending_task_count'] = sum(state['assigned'] and not state['installed']
                                          for state in device['capability_states'])
    for group in groups:
@@ -783,11 +789,6 @@ def create_action():
                group_name, capability_id, parameters_json, scope, username, created_at)
                VALUES(?,?,?,?,?,?)''', (group_name, capability_id,
                json.dumps(parameters, ensure_ascii=False), scope, username, int(time.time())))
-            if not capability_id.startswith('__lcs_'):
-               conn.execute('''INSERT INTO capability_assignments(capability_id, target_type, target_id, enabled)
-                  VALUES(?, 'group', ?, 1) ON CONFLICT(capability_id, target_type, target_id)
-                  DO UPDATE SET enabled=1''', (capability_id, group_name))
-         bump_generation()
       run_at = int(request.form.get('run_at') or time.time())
       for target_device in devices:
          core.queue_action(target_device['id'], capability_id, parameters, run_at,

@@ -84,9 +84,21 @@
    const executeModal = document.querySelector('#execute-modal');
    const executionTime = document.querySelector('#execution-time');
    const scheduledAt = document.querySelector('#scheduled-at');
+   const executeCapability = document.querySelector('#execute-capability');
    document.querySelectorAll('.execute-client').forEach(button => button.addEventListener('click', () => {
       document.querySelector('#execute-target').value = button.dataset.deviceId;
       document.querySelector('#execute-client-title').textContent = `Code auf ${button.dataset.deviceName} ausführen`;
+      const capabilities = JSON.parse(button.dataset.capabilities);
+      executeCapability.replaceChildren(...capabilities.map(capability => {
+         const option = document.createElement('option');
+         option.value = capability.id;
+         option.textContent = capability.title;
+         option.dataset.parameters = JSON.stringify(capability.parameters);
+         return option;
+      }));
+      document.querySelector('#execute-empty').hidden = capabilities.length > 0;
+      document.querySelector('#execute-submit').disabled = capabilities.length === 0;
+      executeCapability.dispatchEvent(new Event('change'));
       executeModal.showModal();
    }));
    executionTime?.addEventListener('change', () => {
@@ -97,7 +109,6 @@
       document.querySelector('#execute-run-at').value = executionTime.value === 'scheduled'
          ? String(Math.floor(new Date(scheduledAt.value).getTime() / 1000)) : '';
    });
-   const executeCapability = document.querySelector('#execute-capability');
    executeCapability?.addEventListener('change', () => {
       const example = executeCapability.selectedOptions[0]?.dataset.parameters;
       document.querySelector('#execute-parameters').value = example ? JSON.stringify(JSON.parse(example), null, 2) : '{}';
