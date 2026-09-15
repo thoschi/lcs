@@ -32,11 +32,11 @@
    const search = document.querySelector('#client-search');
    const platform = document.querySelector('#platform-filter');
    const deviceType = document.querySelector('#client-type-filter');
-   const group = document.querySelector('#group-filter');
    const count = document.querySelector('#client-result-count');
    let sortKey = 'hostname';
    let sortAscending = true;
-   const rows = () => body ? [...body.querySelectorAll('tr[data-client-id]')] : [];
+   const rows = () => body ? [...body.querySelectorAll('tr[data-entry]')] : [];
+   const clientRows = () => rows().filter(row => row.dataset.clientId);
 
    const applyView = () => {
       if (!table) return;
@@ -45,12 +45,11 @@
       rows().forEach(row => {
          const show = terms.every(term => row.dataset.search.includes(term)) &&
             (!platform.value || row.dataset.platform.toLocaleLowerCase('de-DE') === platform.value.toLocaleLowerCase('de-DE')) &&
-            (!deviceType.value || row.dataset.clientType === deviceType.value) &&
-            (!group.value || row.dataset.groups.split(',').map(value => value.trim()).includes(group.value));
+            (!deviceType.value || row.dataset.entryType === deviceType.value);
          row.hidden = !show;
          if (show) visible += 1;
       });
-      count.textContent = `${visible} von ${rows().length} Clients`;
+      count.textContent = `${visible} von ${rows().length} Einträgen`;
    };
 
    const sortRows = key => {
@@ -67,7 +66,6 @@
    search?.addEventListener('input', applyView);
    platform?.addEventListener('change', applyView);
    deviceType?.addEventListener('change', applyView);
-   group?.addEventListener('change', applyView);
    document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => {
       sortRows(button.dataset.sort);
       document.querySelectorAll('.sort-button').forEach(item => {
@@ -165,22 +163,22 @@
          if (!response.ok) throw new Error(`HTTP ${response.status}`);
          const data = await response.json();
          if (table) {
-            const currentIds = rows().map(row => row.dataset.clientId).sort().join(',');
+            const currentIds = clientRows().map(row => row.dataset.clientId).sort().join(',');
             const newIds = data.devices.map(device => device.id).sort().join(',');
             if (currentIds !== newIds || data.devices.some(device => {
                const row = body.querySelector(`[data-client-id="${CSS.escape(device.id)}"]`);
-               return row.dataset.clientType !== (device.is_image_source ? 'template' : 'client');
+               return row.dataset.entryType !== (device.is_image_source ? 'template' : 'client');
             })) return location.reload();
             data.devices.forEach(device => {
                const row = body.querySelector(`[data-client-id="${CSS.escape(device.id)}"]`);
                const status = row.querySelector('[data-field="status"]');
                status.querySelector('.dot').classList.toggle('online', device.online);
                status.querySelector('span:last-child').textContent = device.online ? 'online' : 'offline';
-               for (const [field, value] of Object.entries({hostname: device.hostname, platform: device.platform, groups: device.groups, agent: device.agent_version, last_seen: device.last_seen_text})) {
+               for (const [field, value] of Object.entries({hostname: device.hostname, platform: device.platform, agent: device.agent_version, last_seen: device.last_seen_text})) {
                   row.querySelector(`[data-field="${field}"]`).textContent = value || '–';
                }
                Object.assign(row.dataset, {status: device.online ? '1' : '0', hostname: device.hostname.toLowerCase(), platform: device.platform,
-                  groups: device.groups.toLowerCase(), agent: device.agent_version.toLowerCase(), last_seen: String(device.last_seen), search: JSON.stringify(device).toLowerCase()});
+                  agent: device.agent_version.toLowerCase(), last_seen: String(device.last_seen), search: JSON.stringify(device).toLowerCase()});
                document.querySelectorAll(`[data-status-device-id="${CSS.escape(device.id)}"]`).forEach(dot => dot.classList.toggle('online', device.online));
                document.querySelectorAll(`[data-last-seen-device-id="${CSS.escape(device.id)}"]`).forEach(element => { element.textContent = device.last_seen_text; });
             });

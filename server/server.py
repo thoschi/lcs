@@ -275,12 +275,45 @@ def render_admin(new_token=None, editor=None, page='overview'):
                bucket.append(target)
       capability['installed_clients'], capability['pending_clients'] = installed, pending
    for device in devices:
-      device['pending_task_count'] = sum(device in capability['pending_clients']
-                                         for capability in manifest.get('capabilities', []))
+      device['capability_states'] = []
+      for capability in manifest.get('capabilities', []):
+         assigned = core.capability_enabled_for_device(device['id'], capability['id'])
+         installed = device in capability['installed_clients']
+         device['capability_states'].append({
+            'id': capability['id'], 'title': capability['title'],
+            'assigned': assigned, 'installed': assigned and installed,
+         })
+      device['pending_task_count'] = sum(state['assigned'] and not state['installed']
+                                         for state in device['capability_states'])
+   for group in groups:
+      members = [device for device in devices if group['name'] in (device.get('groups') or '').split(', ')]
+      group['members'] = members
+      group['capability_states'] = []
+      for capability in manifest.get('capabilities', []):
+         assignment = next((item for item in assignments
+            if item['capability_id'] == capability['id'] and item['target_type'] == 'group'
+            and item['target_id'] == group['name']), None)
+         assigned = bool(assignment and assignment['enabled'])
+         installed_count = sum(device in capability['installed_clients'] for device in members) if assigned else 0
+         group['capability_states'].append({
+            'id': capability['id'], 'title': capability['title'], 'assigned': assigned,
+            'installed_count': installed_count, 'member_count': len(members),
+         })
+   all_group = {'name': 'alle', 'description': 'Alle Clients', 'device_count': len(devices),
+                'members': devices, 'virtual': True, 'capability_states': []}
+   for capability in manifest.get('capabilities', []):
+      assignment = next((item for item in assignments
+         if item['capability_id'] == capability['id'] and item['target_type'] == 'all'), None)
+      assigned = bool(assignment and assignment['enabled'])
+      all_group['capability_states'].append({
+         'id': capability['id'], 'title': capability['title'], 'assigned': assigned,
+         'installed_count': len(capability['installed_clients']) if assigned else 0,
+         'member_count': len(devices),
+      })
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=manifest,
                           now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
-                          task_devices=task_devices, page=page, logs=logs, histories=histories)
+                          task_devices=task_devices, page=page, logs=logs, histories=histories, all_group=all_group)
 
 
 @app.get('/health')
@@ -461,14 +494,29 @@ def client_status():
 def save_group():
    check_csrf()
    name = request.form.get('name', '').strip()
-   if not name:
-      abort(400, 'Gruppenname fehlt')
+   original_name = request.form.get('original_name', '').strip()
+   if not name or name.lower() == 'alle':
+      abort(400, 'Ungültiger Gruppenname')
    with core.db() as conn:
+      if original_name and original_name != name:
+         if conn.execute('SELECT 1 FROM groups WHERE name=?', (name,)).fetchone():
+            abort(409, 'Der Gruppenname ist bereits vergeben')
+         conn.execute('UPDATE groups SET name=? WHERE name=?', (name, original_name))
+         conn.execute('UPDATE device_groups SET group_name=? WHERE group_name=?', (name, original_name))
+         conn.execute('UPDATE action_templates SET group_name=? WHERE group_name=?', (name, original_name))
+         conn.execute("UPDATE capability_assignments SET target_id=? WHERE target_type='group' AND target_id=?", (name, original_name))
       conn.execute('''INSERT INTO groups(name, description) VALUES(?,?)
          ON CONFLICT(name) DO UPDATE SET description=excluded.description''',
          (name, request.form.get('description', '').strip()))
+      if original_name:
+         selected = set(request.form.getlist('device_ids'))
+         conn.execute('DELETE FROM device_groups WHERE group_name=?', (name,))
+         conn.executemany('INSERT INTO device_groups(group_name, device_id) VALUES(?,?)',
+                          [(name, device_id) for device_id in selected])
+   if original_name:
+      bump_generation()
    flash('Gruppe gespeichert.', 'success')
-   return redirect(url_for('admin_clients') + '#groups')
+   return redirect(url_for('admin_clients') + '#devices')
 
 
 @app.post('/admin/group-membership')
@@ -526,7 +574,7 @@ def delete_group(name):
       conn.execute('DELETE FROM groups WHERE name=?', (name,))
    bump_generation()
    flash('Gruppe gelöscht.', 'success')
-   return redirect(url_for('admin_clients') + '#groups')
+   return redirect(url_for('admin_clients') + '#devices')
 
 
 @app.post('/admin/action-template/<int:template_id>/delete')
@@ -536,7 +584,7 @@ def delete_action_template(template_id):
    with core.db() as conn:
       conn.execute('DELETE FROM action_templates WHERE id=?', (template_id,))
    flash('Vorbereitete Aufgabe entfernt.', 'success')
-   return redirect(url_for('admin_clients') + '#groups')
+   return redirect(url_for('admin_clients') + '#devices')
 
 
 @app.post('/admin/token')
