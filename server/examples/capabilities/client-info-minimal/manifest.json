@@ -1,0 +1,11 @@
+{
+  "id": "client-info-minimal",
+  "version": "1.0.0",
+  "title": "Client-Basisinfos (minimal)",
+  "description": "Befüllt den Info-Block des Clients nur mit IP- und MAC-Adressen.",
+  "scope": "system",
+  "tags": [],
+  "timeout": 30,
+  "triggers": [{"type": "startup"}, {"type": "interval", "seconds": 21600}],
+  "entrypoint": "action.py"
+}

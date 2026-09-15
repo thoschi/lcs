@@ -217,6 +217,18 @@ def dashboard_data():
          item['hardware'] = json.loads(item.get('hardware_json') or '{}')
       except json.JSONDecodeError:
          item['hardware'] = {}
+      labels = {
+         'ip_addresses': 'IP-Adressen', 'mac_addresses': 'MAC-Adressen',
+         'serial_number': 'Seriennummer', 'operating_system': 'Betriebssystem',
+         'os_release': 'Systemversion', 'architecture': 'Architektur',
+         'processor': 'Prozessor', 'manufacturer': 'Hersteller', 'model': 'Modell',
+         'bios': 'BIOS', 'memory_bytes': 'Arbeitsspeicher (Bytes)',
+         'software': 'Installierte Software',
+      }
+      item['info_items'] = [
+         {'label': labels.get(key, key.replace('_', ' ').title()), 'value': value}
+         for key, value in item['hardware'].items()
+      ]
    template_tree = []
    for template in (item for item in devices if item['is_image_source']):
       branch = dict(template)
@@ -719,6 +731,12 @@ def install_examples():
       if source.is_dir() and (source / 'manifest.json').is_file():
          publish_capability(source)
          installed += 1
+   with core.db() as conn:
+      conn.execute('''INSERT INTO capability_assignments(
+            capability_id, target_type, target_id, enabled, execution)
+         VALUES('client-info-minimal', 'all', '*', 1, 'hourly')
+         ON CONFLICT(capability_id, target_type, target_id) DO NOTHING''')
+   bump_generation()
    flash('%d Beispielaktionen veröffentlicht; bitte den gewünschten Clients zuordnen.' % installed, 'success')
    return redirect(url_for('admin_tasks') + '#capabilities')
 
