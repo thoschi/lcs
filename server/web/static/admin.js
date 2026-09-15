@@ -1,4 +1,13 @@
 (() => {
+   document.querySelectorAll('[data-open-modal]').forEach(button => button.addEventListener('click', () => {
+      document.getElementById(button.dataset.openModal)?.showModal();
+   }));
+   document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('click', event => {
+      if (event.target === dialog) dialog.close();
+   }));
+   const taskModal = document.querySelector('#task-modal');
+   if (taskModal?.querySelector('[name="id"]').value) taskModal.showModal();
+
    const capability = document.querySelector('#action-capability');
    const parameters = document.querySelector('#action-parameters');
    capability?.addEventListener('change', () => {
@@ -31,13 +40,13 @@
 
    const applyView = () => {
       if (!table) return;
-      const query = search.value.trim().toLowerCase();
+      const terms = search.value.trim().toLocaleLowerCase('de-DE').split(/\s+/).filter(Boolean);
       let visible = 0;
       rows().forEach(row => {
-         const show = (!query || row.dataset.search.includes(query)) &&
-            (!platform.value || row.dataset.platform === platform.value) &&
+         const show = terms.every(term => row.dataset.search.includes(term)) &&
+            (!platform.value || row.dataset.platform.toLocaleLowerCase('de-DE') === platform.value.toLocaleLowerCase('de-DE')) &&
             (!deviceType.value || row.dataset.clientType === deviceType.value) &&
-            (!group.value || row.dataset.groups.split(', ').includes(group.value));
+            (!group.value || row.dataset.groups.split(',').map(value => value.trim()).includes(group.value));
          row.hidden = !show;
          if (show) visible += 1;
       });
@@ -59,7 +68,35 @@
    platform?.addEventListener('change', applyView);
    deviceType?.addEventListener('change', applyView);
    group?.addEventListener('change', applyView);
-   document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => sortRows(button.dataset.sort)));
+   document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => {
+      sortRows(button.dataset.sort);
+      document.querySelectorAll('.sort-button').forEach(item => {
+         item.classList.toggle('active', item === button);
+         item.setAttribute('aria-sort', item === button ? (sortAscending ? 'ascending' : 'descending') : 'none');
+      });
+   }));
+
+   const executeModal = document.querySelector('#execute-modal');
+   const executionTime = document.querySelector('#execution-time');
+   const scheduledAt = document.querySelector('#scheduled-at');
+   document.querySelectorAll('.execute-client').forEach(button => button.addEventListener('click', () => {
+      document.querySelector('#execute-target').value = button.dataset.deviceId;
+      document.querySelector('#execute-client-title').textContent = `Code auf ${button.dataset.deviceName} ausführen`;
+      executeModal.showModal();
+   }));
+   executionTime?.addEventListener('change', () => {
+      document.querySelector('#scheduled-field').hidden = executionTime.value !== 'scheduled';
+      scheduledAt.required = executionTime.value === 'scheduled';
+   });
+   executeModal?.querySelector('form.modal-form').addEventListener('submit', () => {
+      document.querySelector('#execute-run-at').value = executionTime.value === 'scheduled'
+         ? String(Math.floor(new Date(scheduledAt.value).getTime() / 1000)) : '';
+   });
+   const executeCapability = document.querySelector('#execute-capability');
+   executeCapability?.addEventListener('change', () => {
+      const example = executeCapability.selectedOptions[0]?.dataset.parameters;
+      document.querySelector('#execute-parameters').value = example ? JSON.stringify(JSON.parse(example), null, 2) : '{}';
+   });
 
    const formatTime = timestamp => timestamp
       ? new Date(timestamp * 1000).toLocaleString('de-DE', {dateStyle: 'short', timeStyle: 'medium'})
