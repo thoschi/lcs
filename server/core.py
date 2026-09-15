@@ -249,7 +249,7 @@ def enrollment_settings(user_data='', use_domain_username=False, password_userna
    return settings
 
 
-def add_enrollment_token(name, password='', template=True, token=None, settings=None, hostname=''):
+def add_enrollment_token(name, password='', template=True, token=None, settings=None, hostname='', token_type=''):
    name = str(name).strip()
    if not name:
       raise ValueError('Token-Name fehlt')
@@ -258,6 +258,9 @@ def add_enrollment_token(name, password='', template=True, token=None, settings=
    hostname = str(hostname).strip().lower()
    if '\n' in hostname or '\r' in hostname:
       raise ValueError('Hostname darf keinen Zeilenumbruch enthalten')
+   token_type = token_type or ('template' if template else 'single')
+   if token_type not in ('template', 'shared', 'single'):
+      raise ValueError('Ungültiger Token-Typ')
    material = name + '\0' + ((hostname + '\0') if hostname else '') + str(password)
    token = token or hashlib.sha256(material.encode('utf-8')).hexdigest()
    group_name = 'Enrollment: ' + name
@@ -270,7 +273,7 @@ def add_enrollment_token(name, password='', template=True, token=None, settings=
             token_value
          ) VALUES(?,?,?,?,?,?,?,?,?,?)
       ''', (name, token_hash(token), token[:8], now_ts(), hostname, password_hash(password),
-            json.dumps(settings or {}, ensure_ascii=False), 'template' if template else 'single', group_name, token))
+            json.dumps(settings or {}, ensure_ascii=False), token_type, group_name, token))
    return token
 
 
@@ -374,6 +377,10 @@ def enroll(payload):
          if reusable['token_type'] == 'single':
             _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
             conn.execute('DELETE FROM enrollment_tokens WHERE id=?', (reusable['id'],))
+         elif reusable['token_type'] == 'shared':
+            _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
+            conn.execute('''UPDATE enrollment_tokens SET last_used_at=?, enrollment_count=enrollment_count+1
+               WHERE id=?''', (now, reusable['id']))
          elif not reusable['template_device_id']:
             conn.execute('''UPDATE enrollment_tokens SET template_device_id=?, last_used_at=?,
                enrollment_count=enrollment_count+1 WHERE id=?''', (device_id, now, reusable['id']))
@@ -714,6 +721,8 @@ def device_event(device_id, token, payload):
 
 
 def delete_device_data(conn, device_id):
+   conn.execute("UPDATE enrollment_tokens SET template_device_id='' WHERE template_device_id=?", (device_id,))
+   conn.execute("UPDATE devices SET template_device_id='' WHERE template_device_id=?", (device_id,))
    conn.execute('DELETE FROM sessions WHERE device_id=?', (device_id,))
    conn.execute('DELETE FROM actions WHERE device_id=?', (device_id,))
    conn.execute('DELETE FROM events WHERE device_id=?', (device_id,))

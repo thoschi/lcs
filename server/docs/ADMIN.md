@@ -49,10 +49,11 @@ Proxy muss TLS terminieren, Host und Protokoll weiterreichen und `/`, `/admin`,
 Enrollment-Zugänge bestehen aus Name und Passwort und sind nicht an einen
 Hostnamen gebunden. Ein Vorlagen-Token bereitet bei der ersten Anmeldung den
 Imaging-Rechner als reinen Vorlagen-Client vor; erst seine Klone werden als
-fertige Clients registriert. Ein unabhängiger Token registriert dagegen sofort
-einen fertigen Client und wird nach dieser Anmeldung gelöscht.
+fertige Clients registriert. Ein wiederverwendbarer Client-Token registriert
+dagegen alle Geräte sofort als fertige Clients und eignet sich etwa zur Verteilung
+über LINBO. Ein einmaliger Client-Token wird nach seiner ersten Anmeldung gelöscht.
 
-Beim Anlegen erzeugen beide Token-Arten eine dauerhafte Gruppe namens
+Beim Anlegen erzeugen alle Token-Arten eine dauerhafte Gruppe namens
 `Enrollment: <Name>`. Fertige Clients werden bereits während des Enrollments
 Mitglied dieser Gruppe. Der Token oder der Vorlagen-Client kann später gelöscht
 werden, ohne die Gruppe zu entfernen. Gruppen lassen sich in der Aktionsplanung

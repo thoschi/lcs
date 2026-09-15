@@ -354,7 +354,8 @@ def cmd_device_delete(args):
 
 def cmd_token_create(args):
    settings = enrollment_settings(args.user_data, args.use_domain_username, args.password_username)
-   add_enrollment_token(args.name, args.password, not args.without_template, settings=settings)
+   token_type = 'shared' if args.shared else ('single' if args.without_template else 'template')
+   add_enrollment_token(args.name, args.password, settings=settings, token_type=token_type)
    print('Vorläufiger Enrollment-Zugang erzeugt; der Installer ruft ihn mit dem Passwort ab.')
    return 0
 
@@ -364,8 +365,8 @@ def cmd_tokens(args):
       rows = db.execute('SELECT * FROM enrollment_tokens ORDER BY created_at DESC').fetchall()
    for row in rows:
       status = 'aktiv' if row['enabled'] else 'widerrufen'
-      kind = 'Vorlage' if row['token_type'] == 'template' else 'einmalig'
-      template = row['template_device_id'] or 'vorläufig'
+      kind = {'template': 'Vorlage', 'shared': 'gemeinsam', 'single': 'einmalig'}.get(row['token_type'], row['token_type'])
+      template = (row['template_device_id'] or 'vorläufig') if row['token_type'] == 'template' else '-'
       last_used = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(row['last_used_at'])) if row['last_used_at'] else '-'
       print(f"{row['id']:4} {row['name'][:28]:28} {kind:9} {template[:16]:16} {row['token_prefix']}… {status:10} {row['enrollment_count']:5} {last_used}")
    return 0
@@ -404,7 +405,7 @@ def main():
    p = sub.add_parser('capability-unassign'); p.add_argument('capability'); p.add_argument('target'); p.set_defaults(func=cmd_capability_unassign)
    p = sub.add_parser('device-reset'); p.add_argument('device'); p.set_defaults(func=cmd_device_reset)
    p = sub.add_parser('device-delete'); p.add_argument('device'); p.add_argument('--force', action='store_true'); p.set_defaults(func=cmd_device_delete)
-   p = sub.add_parser('token-create'); p.add_argument('name'); p.add_argument('password'); p.add_argument('--without-template', action='store_true'); p.add_argument('--user-data', default=''); p.add_argument('--password-username', default=''); p.add_argument('--use-domain-username', action='store_true'); p.set_defaults(func=cmd_token_create)
+   p = sub.add_parser('token-create'); p.add_argument('name'); p.add_argument('password'); token_mode = p.add_mutually_exclusive_group(); token_mode.add_argument('--without-template', action='store_true'); token_mode.add_argument('--shared', action='store_true'); p.add_argument('--user-data', default=''); p.add_argument('--password-username', default=''); p.add_argument('--use-domain-username', action='store_true'); p.set_defaults(func=cmd_token_create)
    p = sub.add_parser('tokens'); p.set_defaults(func=cmd_tokens)
    p = sub.add_parser('token-revoke'); p.add_argument('token', help='ID oder Name'); p.set_defaults(func=cmd_token_revoke)
 
