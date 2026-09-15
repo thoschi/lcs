@@ -63,7 +63,7 @@
    };
 
    search?.addEventListener('input', applyView);
-   document.querySelectorAll('.filter-buttons').forEach(group => group.addEventListener('click', event => {
+   document.querySelectorAll('.filter-buttons[data-filter]').forEach(group => group.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (!button) return;
       filters[group.dataset.filter] = button.dataset.value;
@@ -207,10 +207,13 @@
       const terms = document.querySelector('#log-search').value.trim().toLocaleLowerCase('de-DE').split(/\s+/).filter(Boolean);
       const client = document.querySelector('#log-client').value;
       const action = document.querySelector('#log-action').value;
+      const periodDays = Number(document.querySelector('#log-period').value);
+      const cutoff = periodDays ? Date.now() / 1000 - periodDays * 86400 : 0;
       let visible = 0;
       logRows().forEach(row => {
          const show = selectedAspects.has(row.dataset.aspect) && (!client || row.dataset.client === client) &&
-            (!action || row.dataset.action === action) && terms.every(term => row.dataset.search.includes(term));
+            (!action || row.dataset.action === action) && Number(row.dataset.timestamp) >= cutoff &&
+            terms.every(term => row.dataset.search.includes(term));
          row.hidden = !show;
          if (show) visible += 1;
       });
@@ -219,6 +222,7 @@
    document.querySelector('#log-search')?.addEventListener('input', applyLogView);
    document.querySelector('#log-client')?.addEventListener('change', applyLogView);
    document.querySelector('#log-action')?.addEventListener('change', applyLogView);
+   document.querySelector('#log-period')?.addEventListener('change', applyLogView);
    document.querySelector('#log-aspects')?.addEventListener('click', event => {
       const button = event.target.closest('button');
       if (!button) return;
