@@ -85,12 +85,13 @@
 
    const selectedClients = () => clientRows().filter(row => row.querySelector('.client-select').checked);
    const selectionToggle = document.querySelector('#select-filtered-clients');
-   const uploadModal = document.querySelector('#upload-modal');
+   const manageTasksModal = document.querySelector('#manage-tasks-modal');
    const executeModal = document.querySelector('#execute-modal');
    const executionTime = document.querySelector('#execution-time');
    const scheduledAt = document.querySelector('#scheduled-at');
    const executeCapability = document.querySelector('#execute-capability');
    const capabilitiesFor = row => JSON.parse(row.dataset.capabilities || '[]');
+   const capabilityStatesFor = row => JSON.parse(row.dataset.capabilityStates || '[]');
 
    const updateSelection = () => {
       const selected = selectedClients();
@@ -98,7 +99,7 @@
       const selectedVisible = visible.filter(row => row.querySelector('.client-select').checked).length;
       document.querySelector('#client-selection-count').textContent = selected.length
          ? `${selected.length} Client${selected.length === 1 ? '' : 's'} ausgewählt` : 'Keine Clients ausgewählt';
-      document.querySelector('#upload-selected').disabled = selected.length === 0;
+      document.querySelector('#manage-tasks-selected').disabled = selected.length === 0;
       document.querySelector('#execute-selected').disabled = selected.length === 0;
       selectionToggle.checked = visible.length > 0 && selectedVisible === visible.length;
       selectionToggle.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
@@ -110,23 +111,33 @@
       updateSelection();
    });
 
-   document.querySelector('#upload-selected')?.addEventListener('click', () => {
+   document.querySelector('#manage-tasks-selected')?.addEventListener('click', () => {
       const selected = selectedClients();
-      const list = document.querySelector('#upload-capabilities');
+      const list = document.querySelector('#managed-capabilities');
       const byId = new Map(JSON.parse(list.dataset.capabilities).map(capability =>
-         [capability.id, {id: capability.id, title: capability.title, count: 0}]));
-      selected.forEach(row => capabilitiesFor(row).forEach(capability => {
-         if (byId.has(capability.id)) byId.get(capability.id).count += 1;
+         [capability.id, {id: capability.id, title: capability.title, assigned: 0, installed: 0}]));
+      selected.forEach(row => capabilityStatesFor(row).forEach(capability => {
+         const aggregate = byId.get(capability.id);
+         if (!aggregate) return;
+         if (capability.assigned) aggregate.assigned += 1;
+         if (capability.installed) aggregate.installed += 1;
       }));
       list.replaceChildren(...[...byId.values()].map(capability => {
          const form = document.createElement('form');
          form.method = 'post';
          form.action = '/admin/assignment';
-         const mixed = capability.count > 0 && capability.count < selected.length;
-         const state = capability.count === selected.length ? 'Auf allen Clients' : mixed ? 'Unterschiedlich verteilt' : 'Auf keinem Client';
+         const mixed = capability.assigned > 0 && capability.assigned < selected.length;
+         const pending = capability.assigned - capability.installed;
+         const state = mixed
+            ? `Uneinheitlich: ${capability.installed} installiert, ${pending} vorgemerkt, ${selected.length - capability.assigned} nicht installiert`
+            : capability.assigned === 0
+               ? 'Nicht installiert'
+               : pending > 0
+                  ? `${capability.installed} installiert, ${pending} zur Installation vorgemerkt`
+                  : 'Auf allen Clients installiert';
          form.innerHTML = `<input type="hidden" name="csrf" value="${document.querySelector('[name=csrf]').value}">
-            <input type="hidden" name="capability" value="${capability.id}"><input type="hidden" name="enabled" value="1">
-            <input type="hidden" name="next" value="clients"><span><strong></strong><small></small></span><button>Allen zuweisen</button>`;
+            <input type="hidden" name="capability" value="${capability.id}">
+            <input type="hidden" name="next" value="clients"><span><strong></strong><small></small></span><div class="assignment-buttons"></div>`;
          form.querySelector('strong').textContent = capability.title;
          form.querySelector('small').textContent = state;
          selected.forEach(row => {
@@ -134,15 +145,26 @@
             input.type = 'hidden'; input.name = 'device_ids'; input.value = row.dataset.clientId;
             form.appendChild(input);
          });
-         if (mixed) form.classList.add('mixed-assignment');
-         if (capability.count === selected.length) {
-            form.querySelector('button').textContent = 'Bereits einheitlich';
-            form.querySelector('button').disabled = true;
+         const buttons = form.querySelector('.assignment-buttons');
+         const addButton = (label, enabled, className = '') => {
+            const button = document.createElement('button');
+            button.name = 'enabled'; button.value = enabled; button.textContent = label;
+            if (className) button.className = className;
+            buttons.appendChild(button);
+         };
+         if (mixed) {
+            form.classList.add('mixed-assignment');
+            addButton('Installieren', '1');
+            addButton('Löschen', '0', 'danger');
+         } else if (capability.assigned === selected.length) {
+            addButton('Löschen', '0', 'danger');
+         } else {
+            addButton('Installieren', '1');
          }
          return form;
       }));
-      document.querySelector('#upload-hint').textContent = `Status für ${selected.length} ausgewählte Clients. Eine gemischte Aufgabe wird per Klick allen zugewiesen.`;
-      uploadModal.showModal();
+      document.querySelector('#manage-tasks-hint').textContent = `Status für ${selected.length} ausgewählte Clients. Eine Aktion vereinheitlicht den Zustand auf allen markierten Clients.`;
+      manageTasksModal.showModal();
    });
 
    document.querySelector('#execute-selected')?.addEventListener('click', () => {
