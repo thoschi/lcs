@@ -30,7 +30,7 @@
    const table = document.querySelector('#client-table');
    const body = table?.tBodies[0];
    const search = document.querySelector('#client-search');
-   const filters = {entryType: '', platform: ''};
+   const filters = {entryType: '', status: '', platform: ''};
    const count = document.querySelector('#client-result-count');
    let sortKey = 'hostname';
    let sortAscending = true;
@@ -44,6 +44,7 @@
       rows().forEach(row => {
          const show = terms.every(term => row.dataset.search.includes(term)) &&
             (!filters.platform || row.dataset.platform.toLocaleLowerCase('de-DE') === filters.platform.toLocaleLowerCase('de-DE')) &&
+            (!filters.status || row.dataset.status === filters.status) &&
             (!filters.entryType || row.dataset.entryType === filters.entryType);
          row.hidden = !show;
          if (show) visible += 1;
