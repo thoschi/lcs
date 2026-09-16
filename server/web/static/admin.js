@@ -5,6 +5,12 @@
    document.querySelectorAll('dialog').forEach(dialog => dialog.addEventListener('click', event => {
       if (event.target === dialog) dialog.close();
    }));
+   document.querySelectorAll('[data-close-dialog]').forEach(button => button.addEventListener('click', () => {
+      button.closest('dialog').close();
+   }));
+   document.querySelectorAll('[data-assignment-toggle]').forEach(toggle => toggle.addEventListener('change', () => {
+      toggle.closest('.assignment-row').querySelector('.assignment-value').value = toggle.checked ? '1' : '0';
+   }));
    const taskModal = document.querySelector('#task-modal');
    if (taskModal?.querySelector('[name="id"]').value) taskModal.showModal();
 
@@ -123,9 +129,8 @@
          if (capability.installed) aggregate.installed += 1;
       }));
       list.replaceChildren(...[...byId.values()].map(capability => {
-         const form = document.createElement('form');
-         form.method = 'post';
-         form.action = '/admin/assignment';
+         const row = document.createElement('label');
+         row.className = 'assignment-row';
          const mixed = capability.assigned > 0 && capability.assigned < selected.length;
          const pending = capability.assigned - capability.installed;
          const state = mixed
@@ -135,35 +140,34 @@
                : pending > 0
                   ? `${capability.installed} installiert, ${pending} zur Installation vorgemerkt`
                   : 'Auf allen Clients installiert';
-         form.innerHTML = `<input type="hidden" name="csrf" value="${document.querySelector('[name=csrf]').value}">
-            <input type="hidden" name="capability" value="${capability.id}">
-            <input type="hidden" name="next" value="clients"><span><strong></strong><small></small></span><div class="assignment-buttons"></div>`;
-         form.querySelector('strong').textContent = capability.title;
-         form.querySelector('small').textContent = state;
-         selected.forEach(row => {
-            const input = document.createElement('input');
-            input.type = 'hidden'; input.name = 'device_ids'; input.value = row.dataset.clientId;
-            form.appendChild(input);
+         row.innerHTML = `<input type="hidden" name="capability"><input class="assignment-value" type="hidden" name="enabled">
+            <span><strong></strong><small></small></span><span class="switch"><input type="checkbox" data-assignment-toggle><span aria-hidden="true"></span></span>`;
+         row.querySelector('[name=capability]').value = capability.id;
+         row.querySelector('strong').textContent = capability.title;
+         row.querySelector('small').textContent = state;
+         const toggle = row.querySelector('[data-assignment-toggle]');
+         toggle.checked = capability.assigned === selected.length;
+         toggle.indeterminate = mixed;
+         row.querySelector('.assignment-value').value = toggle.checked ? '1' : '0';
+         toggle.addEventListener('change', () => {
+            toggle.indeterminate = false;
+            row.querySelector('.assignment-value').value = toggle.checked ? '1' : '0';
+            updateApplyState();
          });
-         const buttons = form.querySelector('.assignment-buttons');
-         const addButton = (label, enabled, className = '') => {
-            const button = document.createElement('button');
-            button.name = 'enabled'; button.value = enabled; button.textContent = label;
-            if (className) button.className = className;
-            buttons.appendChild(button);
-         };
-         if (mixed) {
-            form.classList.add('mixed-assignment');
-            addButton('Installieren', '1');
-            addButton('Löschen', '0', 'danger');
-         } else if (capability.assigned === selected.length) {
-            addButton('Löschen', '0', 'danger');
-         } else {
-            addButton('Installieren', '1');
-         }
-         return form;
+         return row;
       }));
-      document.querySelector('#manage-tasks-hint').textContent = `Status für ${selected.length} ausgewählte Clients. Eine Aktion vereinheitlicht den Zustand auf allen markierten Clients.`;
+      const form = document.querySelector('#managed-capabilities-form');
+      form.querySelectorAll('[name=device_ids]').forEach(input => input.remove());
+      selected.forEach(selectedRow => {
+         const input = document.createElement('input');
+         input.type = 'hidden'; input.name = 'device_ids'; input.value = selectedRow.dataset.clientId;
+         form.appendChild(input);
+      });
+      function updateApplyState() {
+         document.querySelector('#apply-managed-capabilities').disabled = Boolean(list.querySelector('[data-assignment-toggle]:indeterminate'));
+      }
+      updateApplyState();
+      document.querySelector('#manage-tasks-hint').textContent = `Status für ${selected.length} ausgewählte Clients. Uneinheitliche Schalter müssen vor dem Übernehmen festgelegt werden.`;
       manageTasksModal.showModal();
    });
 

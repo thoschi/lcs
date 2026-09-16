@@ -749,23 +749,27 @@ def install_examples():
 @admin_required
 def save_assignment():
    check_csrf()
-   capability = request.form.get('capability', '')
+   capabilities = request.form.getlist('capability')
+   enabled_states = request.form.getlist('enabled')
+   executions = request.form.getlist('execution') or ['manual'] * len(capabilities)
+   if len(capabilities) != len(enabled_states) or len(capabilities) != len(executions):
+      abort(400)
    targets = ['device:' + device_id for device_id in request.form.getlist('device_ids')]
    targets = targets or [request.form.get('target', '')]
    with core.db() as conn:
-      for target in targets:
-         if target == 'all':
-            target_type, target_id = 'all', '*'
-         else:
-            target_type, target_id = target.split(':', 1)
-         conn.execute('''INSERT INTO capability_assignments(
-               capability_id, target_type, target_id, enabled, execution)
-            VALUES(?,?,?,?,?) ON CONFLICT(capability_id, target_type, target_id)
-            DO UPDATE SET enabled=excluded.enabled, execution=excluded.execution''',
-            (capability, target_type, target_id, int(request.form.get('enabled', '1')),
-             request.form.get('execution', 'manual')))
+      for capability, enabled, execution in zip(capabilities, enabled_states, executions):
+         for target in targets:
+            if target == 'all':
+               target_type, target_id = 'all', '*'
+            else:
+               target_type, target_id = target.split(':', 1)
+            conn.execute('''INSERT INTO capability_assignments(
+                  capability_id, target_type, target_id, enabled, execution)
+               VALUES(?,?,?,?,?) ON CONFLICT(capability_id, target_type, target_id)
+               DO UPDATE SET enabled=excluded.enabled, execution=excluded.execution''',
+               (capability, target_type, target_id, int(enabled), execution))
    bump_generation()
-   flash('Capability-Zuordnung gespeichert.', 'success')
+   flash('Aufgaben-Zuordnungen gespeichert.', 'success')
    destination = url_for('admin_clients') + '#devices' if request.form.get('next') == 'clients' else url_for('admin_tasks')
    return redirect(destination)
 
