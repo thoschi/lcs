@@ -750,18 +750,20 @@ def install_examples():
 def save_assignment():
    check_csrf()
    capability = request.form.get('capability', '')
-   target = request.form.get('target', '')
-   if target == 'all':
-      target_type, target_id = 'all', '*'
-   else:
-      target_type, target_id = target.split(':', 1)
+   targets = ['device:' + device_id for device_id in request.form.getlist('device_ids')]
+   targets = targets or [request.form.get('target', '')]
    with core.db() as conn:
-      conn.execute('''INSERT INTO capability_assignments(
-            capability_id, target_type, target_id, enabled, execution)
-         VALUES(?,?,?,?,?) ON CONFLICT(capability_id, target_type, target_id)
-         DO UPDATE SET enabled=excluded.enabled, execution=excluded.execution''',
-         (capability, target_type, target_id, int(request.form.get('enabled', '1')),
-          request.form.get('execution', 'manual')))
+      for target in targets:
+         if target == 'all':
+            target_type, target_id = 'all', '*'
+         else:
+            target_type, target_id = target.split(':', 1)
+         conn.execute('''INSERT INTO capability_assignments(
+               capability_id, target_type, target_id, enabled, execution)
+            VALUES(?,?,?,?,?) ON CONFLICT(capability_id, target_type, target_id)
+            DO UPDATE SET enabled=excluded.enabled, execution=excluded.execution''',
+            (capability, target_type, target_id, int(request.form.get('enabled', '1')),
+             request.form.get('execution', 'manual')))
    bump_generation()
    flash('Capability-Zuordnung gespeichert.', 'success')
    destination = url_for('admin_clients') + '#devices' if request.form.get('next') == 'clients' else url_for('admin_tasks')
@@ -774,9 +776,11 @@ def create_action():
    check_csrf()
    try:
       parameters = json.loads(request.form.get('parameters', '{}'))
-      target = request.form.get('target', '')
-      devices = core.resolve_devices(target)
-      remember = request.form.get('remember') == '1' and target.startswith('group:')
+      targets = request.form.getlist('targets') or [request.form.get('target', '')]
+      devices = []
+      for target in targets:
+         devices.extend(device for device in core.resolve_devices(target) if device not in devices)
+      remember = len(targets) == 1 and request.form.get('remember') == '1' and targets[0].startswith('group:')
       if not devices and not remember:
          raise ValueError('Kein Client für dieses Ziel gefunden.')
       capability_id = request.form.get('capability', '')
@@ -786,7 +790,7 @@ def create_action():
       username = request.form.get('username', '').strip()
       if remember:
          with core.db() as conn:
-            group_name = target.split(':', 1)[1]
+            group_name = targets[0].split(':', 1)[1]
             conn.execute('''INSERT INTO action_templates(
                group_name, capability_id, parameters_json, scope, username, created_at)
                VALUES(?,?,?,?,?,?)''', (group_name, capability_id,

@@ -50,6 +50,7 @@
          if (show) visible += 1;
       });
       count.textContent = `${visible} von ${rows().length} Einträgen`;
+      if (selectionToggle) updateSelection();
    };
 
    const sortRows = key => {
@@ -82,26 +83,89 @@
       });
    }));
 
+   const selectedClients = () => clientRows().filter(row => row.querySelector('.client-select').checked);
+   const selectionToggle = document.querySelector('#select-filtered-clients');
+   const uploadModal = document.querySelector('#upload-modal');
    const executeModal = document.querySelector('#execute-modal');
    const executionTime = document.querySelector('#execution-time');
    const scheduledAt = document.querySelector('#scheduled-at');
    const executeCapability = document.querySelector('#execute-capability');
-   document.querySelectorAll('.execute-client').forEach(button => button.addEventListener('click', () => {
-      document.querySelector('#execute-target').value = button.dataset.deviceId;
-      document.querySelector('#execute-client-title').textContent = `Code auf ${button.dataset.deviceName} ausführen`;
-      const capabilities = JSON.parse(button.dataset.capabilities);
-      executeCapability.replaceChildren(...capabilities.map(capability => {
+   const capabilitiesFor = row => JSON.parse(row.dataset.capabilities || '[]');
+
+   const updateSelection = () => {
+      const selected = selectedClients();
+      const visible = clientRows().filter(row => !row.hidden);
+      const selectedVisible = visible.filter(row => row.querySelector('.client-select').checked).length;
+      document.querySelector('#client-selection-count').textContent = selected.length
+         ? `${selected.length} Client${selected.length === 1 ? '' : 's'} ausgewählt` : 'Keine Clients ausgewählt';
+      document.querySelector('#upload-selected').disabled = selected.length === 0;
+      document.querySelector('#execute-selected').disabled = selected.length === 0;
+      selectionToggle.checked = visible.length > 0 && selectedVisible === visible.length;
+      selectionToggle.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
+   };
+
+   document.querySelectorAll('.client-select').forEach(input => input.addEventListener('change', updateSelection));
+   selectionToggle?.addEventListener('change', () => {
+      clientRows().filter(row => !row.hidden).forEach(row => { row.querySelector('.client-select').checked = selectionToggle.checked; });
+      updateSelection();
+   });
+
+   document.querySelector('#upload-selected')?.addEventListener('click', () => {
+      const selected = selectedClients();
+      const list = document.querySelector('#upload-capabilities');
+      const byId = new Map(JSON.parse(list.dataset.capabilities).map(capability =>
+         [capability.id, {id: capability.id, title: capability.title, count: 0}]));
+      selected.forEach(row => capabilitiesFor(row).forEach(capability => {
+         if (byId.has(capability.id)) byId.get(capability.id).count += 1;
+      }));
+      list.replaceChildren(...[...byId.values()].map(capability => {
+         const form = document.createElement('form');
+         form.method = 'post';
+         form.action = '/admin/assignment';
+         const mixed = capability.count > 0 && capability.count < selected.length;
+         const state = capability.count === selected.length ? 'Auf allen Clients' : mixed ? 'Unterschiedlich verteilt' : 'Auf keinem Client';
+         form.innerHTML = `<input type="hidden" name="csrf" value="${document.querySelector('[name=csrf]').value}">
+            <input type="hidden" name="capability" value="${capability.id}"><input type="hidden" name="enabled" value="1">
+            <input type="hidden" name="next" value="clients"><span><strong></strong><small></small></span><button>Allen zuweisen</button>`;
+         form.querySelector('strong').textContent = capability.title;
+         form.querySelector('small').textContent = state;
+         selected.forEach(row => {
+            const input = document.createElement('input');
+            input.type = 'hidden'; input.name = 'device_ids'; input.value = row.dataset.clientId;
+            form.appendChild(input);
+         });
+         if (mixed) form.classList.add('mixed-assignment');
+         if (capability.count === selected.length) {
+            form.querySelector('button').textContent = 'Bereits einheitlich';
+            form.querySelector('button').disabled = true;
+         }
+         return form;
+      }));
+      document.querySelector('#upload-hint').textContent = `Status für ${selected.length} ausgewählte Clients. Eine gemischte Aufgabe wird per Klick allen zugewiesen.`;
+      uploadModal.showModal();
+   });
+
+   document.querySelector('#execute-selected')?.addEventListener('click', () => {
+      const selected = selectedClients();
+      const common = capabilitiesFor(selected[0]).filter(capability =>
+         selected.every(row => capabilitiesFor(row).some(item => item.id === capability.id)));
+      document.querySelector('#execute-targets').replaceChildren(...selected.map(row => {
+         const input = document.createElement('input');
+         input.type = 'hidden'; input.name = 'targets'; input.value = row.dataset.clientId;
+         return input;
+      }));
+      document.querySelector('#execute-client-title').textContent = `Code auf ${selected.length} Client${selected.length === 1 ? '' : 's'} ausführen`;
+      executeCapability.replaceChildren(...common.map(capability => {
          const option = document.createElement('option');
-         option.value = capability.id;
-         option.textContent = capability.title;
+         option.value = capability.id; option.textContent = capability.title;
          option.dataset.parameters = JSON.stringify(capability.parameters);
          return option;
       }));
-      document.querySelector('#execute-empty').hidden = capabilities.length > 0;
-      document.querySelector('#execute-submit').disabled = capabilities.length === 0;
+      document.querySelector('#execute-empty').hidden = common.length > 0;
+      document.querySelector('#execute-submit').disabled = common.length === 0;
       executeCapability.dispatchEvent(new Event('change'));
       executeModal.showModal();
-   }));
+   });
    executionTime?.addEventListener('change', () => {
       document.querySelector('#scheduled-field').hidden = executionTime.value !== 'scheduled';
       scheduledAt.required = executionTime.value === 'scheduled';
