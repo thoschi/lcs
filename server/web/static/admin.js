@@ -298,7 +298,11 @@
                row.dataset.capabilities = JSON.stringify(device.executable_capabilities);
                const capabilityStatus = `${device.capability_states.filter(item => item.installed).length} installiert` +
                   (device.pending_task_count ? ` · ${device.pending_task_count} bei nächster Anmeldung` : '') + ' …';
-               row.querySelector('[data-field="capabilities"] span').textContent = capabilityStatus;
+               const capabilitySummary = row.querySelector('[data-field="capabilities"] span');
+               const installedTasks = device.capability_states.filter(item => item.installed).map(item => item.title);
+               const pendingTasks = device.capability_states.filter(item => item.assigned && !item.installed).map(item => item.title);
+               capabilitySummary.textContent = capabilityStatus;
+               capabilitySummary.title = `Installiert: ${installedTasks.join(', ') || 'Keine'}\nAusstehend: ${pendingTasks.join(', ') || 'Keine'}`;
                viewChanged ||= previousView !== [row.dataset.status, row.dataset.hostname, row.dataset.platform, row.dataset.agent].join('\n');
             });
             if (viewChanged) applyView();
