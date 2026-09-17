@@ -498,6 +498,21 @@ def admin_logging():
 @admin_required
 def client_status():
    devices, _, _, _, actions, _ = dashboard_data()
+   manifest = load_manifest()
+   generation = int(manifest.get('generation', 0))
+   for device in devices:
+      states = []
+      executable = []
+      for capability in manifest.get('capabilities', []):
+         assigned = core.capability_enabled_for_device(device['id'], capability['id'])
+         installed = assigned and int(device.get('stack_generation') or 0) >= generation
+         states.append({'id': capability['id'], 'title': capability['title'],
+                        'assigned': assigned, 'installed': installed})
+         if assigned and capability.get('scope', 'system') == 'system':
+            executable.append({'id': capability['id'], 'title': capability['title'],
+                               'parameters': capability.get('parameter_example') or {}})
+      device['capability_states'] = states
+      device['executable_capabilities'] = executable
    return jsonify(devices=[{
       'id': item['id'],
       'online': item['online'],
@@ -509,6 +524,10 @@ def client_status():
       'groups': item['groups'] or '',
       'hardware': item['hardware'],
       'is_image_source': bool(item.get('is_image_source')),
+      'capability_states': item['capability_states'],
+      'executable_capabilities': item['executable_capabilities'],
+      'pending_task_count': sum(state['assigned'] and not state['installed']
+                                for state in item['capability_states']),
    } for item in devices], actions=[{
       'id': item['id'],
       'hostname': item['hostname'],
