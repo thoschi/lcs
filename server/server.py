@@ -229,6 +229,19 @@ def dashboard_data():
          {'label': labels.get(key, key.replace('_', ' ').title()), 'value': value}
          for key, value in item['hardware'].items()
       ]
+   platform_labels = {'windows': 'Win', 'linux': 'Lin', 'linbo': 'Lbo'}
+   for item in devices:
+      same_host = [device for device in devices
+                   if device['hostname'].lower() == item['hostname'].lower() and device.get('platform')]
+      current = max(same_host, key=lambda device: device['last_seen'], default=item)
+      platforms = []
+      for device in same_host:
+         platform = device['platform'].lower()
+         if platform not in [entry['value'] for entry in platforms]:
+            platforms.append({'value': platform, 'label': platform_labels.get(platform, device['platform']),
+                              'current': platform == (current.get('platform') or '').lower()})
+      item['platforms'] = platforms
+      item['platform_filter'] = ' '.join(entry['value'] for entry in platforms)
    template_tree = []
    for template in (item for item in devices if item['is_image_source']):
       branch = dict(template)
@@ -520,6 +533,8 @@ def client_status():
       'last_seen_text': format_datetime(item['last_seen']),
       'hostname': item['hostname'],
       'platform': item['platform'] or '',
+      'platforms': item['platforms'],
+      'platform_filter': item['platform_filter'],
       'agent_version': item['agent_version'] or '',
       'groups': item['groups'] or '',
       'hardware': item['hardware'],
