@@ -36,7 +36,12 @@
    const table = document.querySelector('#client-table');
    const body = table?.tBodies[0];
    const search = document.querySelector('#client-search');
-   const filters = {entryType: '', status: '', platform: ''};
+   const viewStorageKey = 'lcs-client-filters';
+   let storedView = {};
+   try { storedView = JSON.parse(sessionStorage.getItem(viewStorageKey) || '{}'); } catch (_) { /* Ungültige Altwerte ignorieren. */ }
+   if (!storedView || typeof storedView !== 'object') storedView = {};
+   const filters = {entryType: '', status: '', platform: '', ...(storedView.filters || {})};
+   if (search && typeof storedView.search === 'string') search.value = storedView.search;
    const count = document.querySelector('#client-result-count');
    let sortKey = 'hostname';
    let sortAscending = true;
@@ -45,11 +50,12 @@
 
    const applyView = () => {
       if (!table) return;
+      sessionStorage.setItem(viewStorageKey, JSON.stringify({search: search.value, filters}));
       const terms = search.value.trim().toLocaleLowerCase('de-DE').split(/\s+/).filter(Boolean);
       let visible = 0;
       rows().forEach(row => {
          const show = terms.every(term => row.dataset.search.includes(term)) &&
-            (!filters.platform || row.dataset.platform.toLocaleLowerCase('de-DE') === filters.platform.toLocaleLowerCase('de-DE')) &&
+            (!filters.platform || row.dataset.platform.toLocaleLowerCase('de-DE').split(' ').includes(filters.platform.toLocaleLowerCase('de-DE'))) &&
             (!filters.status || row.dataset.status === filters.status) &&
             (!filters.entryType || row.dataset.entryType === filters.entryType);
          row.hidden = !show;
@@ -71,16 +77,24 @@
    };
 
    search?.addEventListener('input', applyView);
-   document.querySelectorAll('.filter-buttons[data-filter]').forEach(group => group.addEventListener('click', event => {
-      const button = event.target.closest('button');
-      if (!button) return;
-      filters[group.dataset.filter] = button.dataset.value;
+   document.querySelectorAll('.filter-buttons[data-filter]').forEach(group => {
+      const selected = group.querySelector(`[data-value="${CSS.escape(filters[group.dataset.filter] || '')}"]`) || group.querySelector('[data-value=""]');
       group.querySelectorAll('button').forEach(item => {
-         item.classList.toggle('active', item === button);
-         item.setAttribute('aria-pressed', String(item === button));
+         item.classList.toggle('active', item === selected);
+         item.setAttribute('aria-pressed', String(item === selected));
       });
-      applyView();
-   }));
+      filters[group.dataset.filter] = selected.dataset.value;
+      group.addEventListener('click', event => {
+         const button = event.target.closest('button');
+         if (!button) return;
+         filters[group.dataset.filter] = button.dataset.value;
+         group.querySelectorAll('button').forEach(item => {
+            item.classList.toggle('active', item === button);
+            item.setAttribute('aria-pressed', String(item === button));
+         });
+         applyView();
+      });
+   });
    document.querySelectorAll('.sort-button').forEach(button => button.addEventListener('click', () => {
       sortRows(button.dataset.sort);
       document.querySelectorAll('.sort-button').forEach(item => {
@@ -116,6 +130,7 @@
       clientRows().filter(row => !row.hidden).forEach(row => { row.querySelector('.client-select').checked = selectionToggle.checked; });
       updateSelection();
    });
+   applyView();
 
    document.querySelector('#manage-tasks-selected')?.addEventListener('click', () => {
       const selected = selectedClients();
@@ -289,10 +304,17 @@
                const status = row.querySelector('[data-field="status"]');
                status.querySelector('.dot').classList.toggle('online', device.online);
                status.querySelector('span:last-child').textContent = device.online ? 'online' : 'offline';
-               for (const [field, value] of Object.entries({hostname: device.hostname, platform: device.platform, agent: device.agent_version, last_seen: device.last_seen_text})) {
+               for (const [field, value] of Object.entries({hostname: device.hostname, agent: device.agent_version, last_seen: device.last_seen_text})) {
                   row.querySelector(`[data-field="${field}"]`).textContent = value || '–';
                }
-               Object.assign(row.dataset, {status: device.online ? '1' : '0', hostname: device.hostname.toLowerCase(), platform: device.platform,
+               const platformCell = row.querySelector('[data-field="platform"]');
+               platformCell.replaceChildren(...device.platforms.flatMap((platform, index) => {
+                  const label = document.createElement(platform.current ? 'strong' : 'span');
+                  label.textContent = platform.label;
+                  return index ? [document.createTextNode(' '), label] : [label];
+               }));
+               if (!device.platforms.length) platformCell.textContent = '–';
+               Object.assign(row.dataset, {status: device.online ? '1' : '0', hostname: device.hostname.toLowerCase(), platform: device.platform_filter,
                   agent: device.agent_version.toLowerCase(), last_seen: String(device.last_seen), search: JSON.stringify(device).toLowerCase()});
                row.dataset.capabilityStates = JSON.stringify(device.capability_states);
                row.dataset.capabilities = JSON.stringify(device.executable_capabilities);
