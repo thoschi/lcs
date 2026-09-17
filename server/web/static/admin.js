@@ -267,8 +267,12 @@
 
    const updateStatus = async () => {
       const indicators = [document.querySelector('#client-refresh-state'), document.querySelector('#action-refresh-state')].filter(Boolean);
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
       try {
-         const response = await fetch('/admin/client-status', {headers: {'Accept': 'application/json'}});
+         const response = await fetch('/admin/client-status', {
+            headers: {'Accept': 'application/json'}, signal: controller.signal,
+         });
          if (!response.ok) throw new Error(`HTTP ${response.status}`);
          const data = await response.json();
          if (table) {
@@ -278,8 +282,10 @@
                const row = body.querySelector(`[data-client-id="${CSS.escape(device.id)}"]`);
                return row.dataset.entryType !== (device.is_image_source ? 'template' : 'client');
             })) return location.reload();
+            let viewChanged = false;
             data.devices.forEach(device => {
                const row = body.querySelector(`[data-client-id="${CSS.escape(device.id)}"]`);
+               const previousView = [row.dataset.status, row.dataset.hostname, row.dataset.platform, row.dataset.agent].join('\n');
                const status = row.querySelector('[data-field="status"]');
                status.querySelector('.dot').classList.toggle('online', device.online);
                status.querySelector('span:last-child').textContent = device.online ? 'online' : 'offline';
@@ -288,8 +294,14 @@
                }
                Object.assign(row.dataset, {status: device.online ? '1' : '0', hostname: device.hostname.toLowerCase(), platform: device.platform,
                   agent: device.agent_version.toLowerCase(), last_seen: String(device.last_seen), search: JSON.stringify(device).toLowerCase()});
+               row.dataset.capabilityStates = JSON.stringify(device.capability_states);
+               row.dataset.capabilities = JSON.stringify(device.executable_capabilities);
+               const capabilityStatus = `${device.capability_states.filter(item => item.installed).length} installiert` +
+                  (device.pending_task_count ? ` · ${device.pending_task_count} bei nächster Anmeldung` : '') + ' …';
+               row.querySelector('[data-field="capabilities"] span').textContent = capabilityStatus;
+               viewChanged ||= previousView !== [row.dataset.status, row.dataset.hostname, row.dataset.platform, row.dataset.agent].join('\n');
             });
-            applyView();
+            if (viewChanged) applyView();
          }
          data.devices.forEach(device => {
             document.querySelectorAll(`[data-status-device-id="${CSS.escape(device.id)}"]`).forEach(dot => dot.classList.toggle('online', device.online));
@@ -302,6 +314,8 @@
          indicators.forEach(indicator => { indicator.textContent = `Zuletzt aktualisiert: ${new Date().toLocaleTimeString('de-DE')}`; });
       } catch (error) {
          indicators.forEach(indicator => { indicator.textContent = 'Statusaktualisierung vorübergehend nicht verfügbar'; });
+      } finally {
+         clearTimeout(timeout);
       }
    };
 
@@ -357,7 +371,19 @@
    applyView();
    applyLogView();
    if (table || document.querySelector('#action-table') || document.querySelector('[data-status-device-id]')) {
-      updateStatus();
-      setInterval(updateStatus, 5000);
+      let refreshTimer;
+      let refreshRunning = false;
+      const refresh = async () => {
+         if (document.hidden || refreshRunning) return;
+         refreshRunning = true;
+         await updateStatus();
+         refreshRunning = false;
+         if (!document.hidden) refreshTimer = setTimeout(refresh, 10000);
+      };
+      refresh();
+      document.addEventListener('visibilitychange', () => {
+         clearTimeout(refreshTimer);
+         if (!document.hidden) refresh();
+      });
    }
 })();
