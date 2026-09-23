@@ -46,6 +46,15 @@ anderem `LCS_USER_DATA`. `$username` oder `${username}` wird zur Laufzeit durch
 den lokalen Sitzungsbenutzer ersetzt. Standardmäßig sind dies unter Linux
 `/home/<benutzer>/.config/lcs` und unter Windows das LCS-Verzeichnis in AppData.
 
+`workstation` installiert auf beiden Plattformen den privilegierten
+Systemdienst und die Nutzereinrichtung für jede lokale Anmeldung. Unter Linux
+erfolgt deren Start über den systemweiten XDG-Autostart, unter Windows über den
+systemweiten `Run`-Eintrag. Auf dem Musterclient bleibt die Nutzereinrichtung
+gesperrt. Erst nach der Registrierung eines daraus erzeugten Clients wird sie
+freigegeben; ein unter Linux vorhandenes Profil wird sofort wiederhergestellt,
+andernfalls fragt die Nutzereinrichtung bei der Anmeldung die Zugangsdaten ab.
+`--no-userclient` installiert ausdrücklich nur den Systemdienst.
+
 Server, Systemdienst und Benutzerprogramme werden mit `install server`,
 `install service` beziehungsweise `install client` einzeln installiert. Ein
 Upgrade erfolgt entsprechend mit `upgrade` statt `install`.
