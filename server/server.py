@@ -207,6 +207,10 @@ def render_admin(new_token=None, editor=None, page='overview'):
    device_by_id = {item['id']: item for item in devices}
    for token in tokens:
       token['template'] = device_by_id.get(token['template_device_id'])
+      try:
+         token['settings'] = json.loads(token.get('settings_json') or '{}')
+      except (json.JSONDecodeError, TypeError):
+         token['settings'] = {}
       token['clients'] = [item for item in devices if
          (token['token_type'] == 'template' and token['template_device_id'] and
           item.get('template_device_id') == token['template_device_id'] and

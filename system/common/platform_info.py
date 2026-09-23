@@ -55,7 +55,7 @@ def _windows_value(command):
    return _cmd(['powershell', '-NoProfile', '-NonInteractive', '-Command', command])
 
 
-def system_information(service_version):
+def system_information(service_version, users=None):
    """Collect only bounded, local inventory calls suitable for every heartbeat."""
    addresses = []
    try:
@@ -76,7 +76,7 @@ def system_information(service_version):
       except OSError:
          serial = ''
       exam_mode = _cmd(['systemctl', 'is-active', 'squid']) == 'active'
-   users = logged_in_users()
+   users = logged_in_users() if users is None else users
    return {
       'service_version': service_version,
       'capabilities': [],

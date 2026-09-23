@@ -455,14 +455,25 @@ def set_hostname(hostname):
    return os.name == 'nt'
 
 
-def heartbeat(config, state, stack):
-   information = system_information(VERSION)
-   information['capabilities'] = public_capabilities()
+def heartbeat(config, state, stack, inventory):
+   users = logged_in_users()
+   now = time.time()
+   refresh_seconds = int(config.get('LCS_INVENTORY_SECONDS', '900'))
+   if not inventory.get('information') or now - inventory.get('updated_at', 0) >= refresh_seconds:
+      inventory['information'] = system_information(VERSION, users)
+      inventory['updated_at'] = now
+   information = dict(inventory['information'])
+   capabilities = public_capabilities()
+   information.update({
+      'capabilities': capabilities,
+      'current_users': users,
+      'current_user': ', '.join(users) if users else 'niemand angemeldet',
+   })
    payload = {
       'agent_version': VERSION,
       'hostname': hostname(),
-      'logged_in_users': logged_in_users(),
-      'capabilities': public_capabilities(),
+      'logged_in_users': users,
+      'capabilities': capabilities,
       'hardware': information,
    }
    return post_device(config, state, '/api/v1/heartbeat', payload)
@@ -679,6 +690,7 @@ def run_forever(env_path=None, stop_requested=None):
    threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
    last_poll = 0
+   inventory = {}
 
    while True:
       now = time.time()
@@ -720,7 +732,6 @@ def run_forever(env_path=None, stop_requested=None):
                   log('Musterclient-Heartbeat fehlgeschlagen', status=status, response=response)
                else:
                   apply_server_role(state, response, paths['state_dir'], user_runtime)
-                  log('Musterclient-Heartbeat erfolgreich')
             except Exception as exc:
                log('Musterclient-Heartbeat nicht verfügbar', error=str(exc))
             last_heartbeat = now
@@ -735,7 +746,6 @@ def run_forever(env_path=None, stop_requested=None):
             flush_events(config, state, paths['state_dir'])
             flush_action_results(config, state, paths['state_dir'])
             code = poll_manual_actions(config, state, stack, paths['state_dir'])
-            log('Aktionsabfrage abgeschlossen', status=code)
             if code == 401:
                state = {}
                user_runtime['client_enabled'] = False
@@ -747,7 +757,7 @@ def run_forever(env_path=None, stop_requested=None):
 
       if now - last_heartbeat >= heartbeat_interval:
          try:
-            status, response = heartbeat(config, state, stack)
+            status, response = heartbeat(config, state, stack, inventory)
             if status == 401:
                state = {}
                user_runtime['client_enabled'] = False
@@ -757,7 +767,6 @@ def run_forever(env_path=None, stop_requested=None):
                log('Heartbeat fehlgeschlagen', status=status, response=response)
             else:
                apply_server_role(state, response, paths['state_dir'], user_runtime)
-               log('Heartbeat erfolgreich', role=response.get('role', 'client'))
          except Exception as exc:
             log('Heartbeat nicht verfügbar', error=str(exc))
          last_heartbeat = now
