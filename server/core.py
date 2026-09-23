@@ -19,8 +19,9 @@ def now_ts():
 
 
 def db():
-   conn = sqlite3.connect(DB_PATH)
+   conn = sqlite3.connect(DB_PATH, timeout=10)
    conn.row_factory = sqlite3.Row
+   conn.execute('PRAGMA busy_timeout=10000')
    return conn
 
 
@@ -77,6 +78,7 @@ def _migrate_devices(conn):
 def init_db():
    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
    with db() as conn:
+      conn.execute('PRAGMA journal_mode=WAL')
       conn.execute('PRAGMA foreign_keys=OFF')
       _migrate_devices(conn)
       _create_devices_table(conn)
@@ -201,6 +203,18 @@ def init_db():
       assignment_columns = {row['name'] for row in conn.execute('PRAGMA table_info(capability_assignments)').fetchall()}
       if 'execution' not in assignment_columns:
          conn.execute("ALTER TABLE capability_assignments ADD COLUMN execution TEXT NOT NULL DEFAULT 'manual'")
+      conn.executescript('''
+         CREATE INDEX IF NOT EXISTS idx_actions_poll
+            ON actions(scope, status, run_at, device_id);
+         CREATE INDEX IF NOT EXISTS idx_actions_execution_device
+            ON actions(execution_device_id);
+         CREATE INDEX IF NOT EXISTS idx_device_groups_device
+            ON device_groups(device_id, group_name);
+         CREATE INDEX IF NOT EXISTS idx_device_audit_created
+            ON device_audit_log(created_at DESC, id DESC);
+         CREATE INDEX IF NOT EXISTS idx_devices_hostname
+            ON devices(hostname COLLATE NOCASE);
+      ''')
       conn.execute('''UPDATE enrollment_tokens SET template_device_id=COALESCE((
          SELECT id FROM devices
          WHERE devices.is_image_source=1 AND lower(devices.hostname)=lower(enrollment_tokens.hostname)
