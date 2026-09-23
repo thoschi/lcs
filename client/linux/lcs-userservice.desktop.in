@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=LCS Nutzereinrichtung
+Exec=@CLIENT_ROOT@/venv/bin/python @CLIENT_ROOT@/user_service.py
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

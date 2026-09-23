@@ -1,12 +1,10 @@
 import argparse
 import getpass
-import hashlib
 import json
 import os
 import sqlite3
 import sys
 import time
-import zipfile
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
@@ -21,34 +19,12 @@ if ENV_FILE.exists():
 
 from core import DB_PATH, SESSION_TTL, add_enrollment_token, create_reenrollment_token, delete_device_data, enrollment_settings, init_db, password_hash, queue_action, resolve_devices, token_hash
 
-MANIFEST = Path(os.environ.get('LCS_MANIFEST_FILE', str(BASE / 'data/bootstrap-manifest.json')))
-RELEASES = Path(os.environ.get('LCS_RELEASES_DIR', str(BASE / 'releases')))
 
 
 def conn():
    c = sqlite3.connect(DB_PATH)
    c.row_factory = sqlite3.Row
    return c
-
-
-def read_manifest():
-   if MANIFEST.exists():
-      return json.loads(MANIFEST.read_text(encoding='utf-8'))
-   return {'generation': 0, 'capabilities': []}
-
-
-def write_manifest(payload):
-   MANIFEST.parent.mkdir(parents=True, exist_ok=True)
-   tmp = MANIFEST.with_suffix('.tmp')
-   tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
-   os.replace(tmp, MANIFEST)
-
-
-def bump_generation():
-   payload = read_manifest()
-   payload['generation'] = int(payload.get('generation', 0)) + 1
-   write_manifest(payload)
-   return payload['generation']
 
 
 def resolve_device_id(db, value):
@@ -178,7 +154,7 @@ def cmd_group_remove_device(args):
    with conn() as db:
       device = resolve_device_id(db, args.device)
       db.execute('DELETE FROM device_groups WHERE group_name=? AND device_id=?', (args.group, device['id']))
-   print(device['hostname'], 'aus', args.group, 'entfernt. Generation', bump_generation())
+   print(device['hostname'], 'aus', args.group, 'entfernt.')
    return 0
 
 
@@ -192,6 +168,9 @@ def cmd_action(args):
       raise ValueError('Kein Gerät für Ziel gefunden: ' + args.target)
    ids = []
    for device in devices:
+      capabilities = json.loads(device['hardware_json'] or '{}').get('capabilities', [])
+      if not any(item.get('id') == args.capability for item in capabilities):
+         raise ValueError('%s bietet diese Fähigkeit nicht an: %s' % (device['hostname'], args.capability))
       ids.append(queue_action(device['id'], args.capability, params, run_at))
    print('%d Aktion(en) eingeplant: %s' % (len(ids), ', '.join(str(x) for x in ids)))
    return 0
@@ -223,111 +202,6 @@ def cmd_logs(args):
       stamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(row['created_at']))
       who = row['username'] or '-'
       print(f"{stamp} {(row['hostname'] or '-')[:22]:22} {row['source']:6} {who[:16]:16} {row['event_type']:20} {row['capability_id'] or '-'}")
-   return 0
-
-
-def validate_capability_manifest(data):
-   for key in ('id', 'version', 'title', 'scope'):
-      if not data.get(key):
-         raise ValueError('manifest.json: %s fehlt' % key)
-   if data['scope'] not in ('system', 'user'):
-      raise ValueError('scope muss system oder user sein')
-   if '/' in data['id'] or '\\' in data['id']:
-      raise ValueError('ungültige Capability-ID')
-
-
-def cmd_capability_publish(args):
-   source = Path(args.directory).resolve()
-   manifest_path = source / 'manifest.json'
-   if not manifest_path.exists():
-      raise ValueError('manifest.json fehlt in ' + str(source))
-   cap = json.loads(manifest_path.read_text(encoding='utf-8'))
-   validate_capability_manifest(cap)
-   RELEASES.mkdir(parents=True, exist_ok=True)
-   filename = '%s-%s.zip' % (cap['id'], cap['version'])
-   archive = RELEASES / filename
-   tmp = archive.with_suffix('.zip.tmp')
-   with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
-      for path in sorted(source.rglob('*')):
-         if path.is_file() and '__pycache__' not in path.parts:
-            zf.write(path, path.relative_to(source).as_posix())
-   digest = hashlib.sha256(tmp.read_bytes()).hexdigest()
-   os.replace(tmp, archive)
-   item = {
-      'id': cap['id'],
-      'version': cap['version'],
-      'title': cap['title'],
-      'description': cap.get('description', ''),
-      'scope': cap['scope'],
-      'tags': cap.get('tags', []),
-      'triggers': cap.get('triggers', []),
-      'filename': filename,
-      'sha256': digest,
-      'timeout': int(cap.get('timeout', 120)),
-   }
-   payload = read_manifest()
-   caps = [x for x in payload.get('capabilities', []) if x.get('id') != cap['id']]
-   caps.append(item)
-   payload['capabilities'] = sorted(caps, key=lambda x: x['id'])
-   payload['generation'] = int(payload.get('generation', 0)) + 1
-   write_manifest(payload)
-   print('%s %s veröffentlicht; noch keinem Client zugewiesen; Generation %s' % (cap['id'], cap['version'], payload['generation']))
-   print('SHA256:', digest)
-   return 0
-
-
-def cmd_capability_remove(args):
-   payload = read_manifest()
-   old = len(payload.get('capabilities', []))
-   payload['capabilities'] = [x for x in payload.get('capabilities', []) if x.get('id') != args.capability]
-   if len(payload['capabilities']) == old:
-      print('Capability nicht gefunden:', args.capability)
-      return 1
-   payload['generation'] = int(payload.get('generation', 0)) + 1
-   write_manifest(payload)
-   with conn() as db:
-      db.execute('DELETE FROM capability_assignments WHERE capability_id=?', (args.capability,))
-   print('Capability entfernt; Generation', payload['generation'])
-   return 0
-
-
-def cmd_capabilities(args):
-   payload = read_manifest()
-   with conn() as db:
-      assignments = db.execute('SELECT * FROM capability_assignments ORDER BY capability_id, target_type, target_id').fetchall()
-   by_cap = {}
-   for row in assignments:
-      sign = '+' if row['enabled'] else '-'
-      target = 'all' if row['target_type'] == 'all' else row['target_type'] + ':' + row['target_id']
-      by_cap.setdefault(row['capability_id'], []).append(sign + target)
-   print('Generation:', payload.get('generation', 0))
-   for cap in payload.get('capabilities', []):
-      targets = ', '.join(by_cap.get(cap['id'], [])) or '(nicht zugewiesen)'
-      print(f"{cap['id']:24} {cap['version']:10} {cap['scope']:6} {targets}")
-   return 0
-
-
-def cmd_capability_assign(args):
-   payload = read_manifest()
-   if not any(cap.get('id') == args.capability for cap in payload.get('capabilities', [])):
-      raise ValueError('Capability nicht veröffentlicht: ' + args.capability)
-   with conn() as db:
-      target_type, target_id, label = parse_target(db, args.target)
-      db.execute('''
-         INSERT INTO capability_assignments(capability_id, target_type, target_id, enabled)
-         VALUES(?,?,?,?)
-         ON CONFLICT(capability_id, target_type, target_id) DO UPDATE SET enabled=excluded.enabled
-      ''', (args.capability, target_type, target_id, 0 if args.disable else 1))
-   print(args.capability, '→', label, 'deaktiviert' if args.disable else 'aktiviert', 'Generation', bump_generation())
-   return 0
-
-
-def cmd_capability_unassign(args):
-   with conn() as db:
-      target_type, target_id, label = parse_target(db, args.target)
-      db.execute('DELETE FROM capability_assignments WHERE capability_id=? AND target_type=? AND target_id=?',
-                 (args.capability, target_type, target_id))
-   print('Zuweisung entfernt:', args.capability, label, 'Generation', bump_generation())
    return 0
 
 
@@ -398,11 +272,6 @@ def main():
    p = sub.add_parser('action'); p.add_argument('target', help='hostname/device-id, group:NAME oder all'); p.add_argument('capability'); p.add_argument('--json', default='{}'); p.add_argument('--at', help='YYYY-MM-DD HH:MM:SS'); p.set_defaults(func=cmd_action)
    p = sub.add_parser('actions'); p.add_argument('--device'); p.add_argument('--limit', type=int, default=30); p.set_defaults(func=cmd_actions)
    p = sub.add_parser('logs'); p.add_argument('--limit', type=int, default=50); p.set_defaults(func=cmd_logs)
-   p = sub.add_parser('capability-publish'); p.add_argument('directory'); p.set_defaults(func=cmd_capability_publish)
-   p = sub.add_parser('capability-remove'); p.add_argument('capability'); p.set_defaults(func=cmd_capability_remove)
-   p = sub.add_parser('capabilities'); p.set_defaults(func=cmd_capabilities)
-   p = sub.add_parser('capability-assign'); p.add_argument('capability'); p.add_argument('target', help='all, group:NAME oder device:HOST'); p.add_argument('--disable', action='store_true'); p.set_defaults(func=cmd_capability_assign)
-   p = sub.add_parser('capability-unassign'); p.add_argument('capability'); p.add_argument('target'); p.set_defaults(func=cmd_capability_unassign)
    p = sub.add_parser('device-reset'); p.add_argument('device'); p.set_defaults(func=cmd_device_reset)
    p = sub.add_parser('device-delete'); p.add_argument('device'); p.add_argument('--force', action='store_true'); p.set_defaults(func=cmd_device_delete)
    p = sub.add_parser('token-create'); p.add_argument('name'); p.add_argument('password'); token_mode = p.add_mutually_exclusive_group(); token_mode.add_argument('--without-template', action='store_true'); token_mode.add_argument('--shared', action='store_true'); p.add_argument('--user-data', default=''); p.add_argument('--password-username', default=''); p.add_argument('--use-domain-username', action='store_true'); p.set_defaults(func=cmd_token_create)

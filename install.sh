@@ -287,9 +287,6 @@ LCS_ACTION_LEASE=180
 LCS_ACTION_PREFETCH=86400
 LCS_SERVER_HOST=$old_host
 LCS_SERVER_PORT=$old_port
-LCS_RELEASES_DIR=$LCS_SERVER_ROOT/releases
-LCS_SOURCE_ROOT=$SOURCE_ROOT
-LCS_MANIFEST_FILE=$LCS_SERVER_ROOT/data/bootstrap-manifest.json
 LCS_SECRET_KEY=$old_secret
 LCS_OIDC_DISCOVERY_URL=$old_discovery
 LCS_OIDC_CLIENT_ID=$old_client_id
@@ -302,7 +299,7 @@ EOF2
 }
 
 migrate_server_data() {
-   mkdir -p "$LCS_SERVER_ROOT/data" "$LCS_SERVER_ROOT/releases"
+   mkdir -p "$LCS_SERVER_ROOT/data"
 
    local db_target="$LCS_SERVER_ROOT/data/lcs.sqlite3"
    if [ ! -f "$db_target" ]; then
@@ -318,29 +315,7 @@ migrate_server_data() {
       done
    fi
 
-   local manifest_target="$LCS_SERVER_ROOT/data/bootstrap-manifest.json"
-   if [ ! -s "$manifest_target" ]; then
-      local old
-      for old in \
-         "$LCS_SERVER_ROOT/bootstrap-manifest.json" \
-         /opt/lmn-client/server/bootstrap-manifest.json \
-         /opt/lmn-client-server/bootstrap-manifest.json; do
-         if [ -f "$old" ]; then
-            cp "$old" "$manifest_target"
-            break
-         fi
-      done
-   fi
 
-   if [ ! -d "$LCS_SERVER_ROOT/releases" ] || [ -z "$(find "$LCS_SERVER_ROOT/releases" -mindepth 1 -print -quit 2>/dev/null)" ]; then
-      local old
-      for old in /opt/lmn-client/server/releases /opt/lmn-client-server/releases; do
-         if [ -d "$old" ]; then
-            cp -a "$old/." "$LCS_SERVER_ROOT/releases/" 2>/dev/null || true
-            break
-         fi
-      done
-   fi
 }
 
 migrate_v04_server_runtime() {
@@ -382,7 +357,7 @@ install_server() {
    migrate_v04_server_runtime
 
    find "$LCS_SERVER_ROOT" -mindepth 1 -maxdepth 1 \
-      ! -name data ! -name releases ! -name bootstrap-manifest.json ! -name venv \
+      ! -name data ! -name venv \
       ! -name server.env \
       -exec rm -rf {} +
    cp "$SOURCE_ROOT/server/core.py" "$LCS_SERVER_ROOT/"
@@ -392,12 +367,8 @@ install_server() {
    cp "$SOURCE_ROOT/server/requirements.txt" "$LCS_SERVER_ROOT/"
    cp "$SOURCE_ROOT/server/server.env.example" "$LCS_SERVER_ROOT/"
    cp -a "$SOURCE_ROOT/server/docs" "$LCS_SERVER_ROOT/"
-   cp -a "$SOURCE_ROOT/server/examples" "$LCS_SERVER_ROOT/"
    cp -a "$SOURCE_ROOT/server/web" "$LCS_SERVER_ROOT/"
 
-   if [ ! -f "$LCS_SERVER_ROOT/data/bootstrap-manifest.json" ]; then
-      cp "$SOURCE_ROOT/server/bootstrap-manifest.json" "$LCS_SERVER_ROOT/data/"
-   fi
 
    if [ ! -d "$LCS_SERVER_ROOT/venv" ]; then
       python3 -m venv "$LCS_SERVER_ROOT/venv"
@@ -407,7 +378,7 @@ install_server() {
    write_server_env
 
    chown -R root:root "$LCS_SERVER_ROOT"
-   chown -R "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/data" "$LCS_SERVER_ROOT/releases"
+   chown -R "$LCS_SERVER_USER:$LCS_SERVER_USER" "$LCS_SERVER_ROOT/data"
 
    mkdir -p "$LCS_SYSTEMD_ROOT"
    render_template "$SOURCE_ROOT/server/templates/lcs-server.service.in" "$LCS_SYSTEMD_ROOT/lcs-server.service"
@@ -445,7 +416,6 @@ write_client_env() {
 LCS_SERVER=$SERVER_URL
 LCS_HEARTBEAT_SECONDS=20
 LCS_POLL_SECONDS=10
-LCS_SYNC_SECONDS=60
 LCS_STATE_ROOT=$LCS_STATE_ROOT
 LCS_FEATURE_ROOT=$LCS_FEATURE_ROOT
 LCS_TOKEN_FILE=$LCS_ENROLLMENT_TOKEN
@@ -511,7 +481,9 @@ install_client() {
 
    write_client_env
 
-   # Der User-Client ist nur eine manuell aufrufbare Oberfläche.
+   # Nur der minimale Einrichtungsdienst startet bei der Anmeldung.
+   render_template "$SOURCE_ROOT/client/linux/lcs-userservice.desktop.in" "$LCS_AUTOSTART_ROOT/lcs-userservice.desktop"
+   chmod 644 "$LCS_AUTOSTART_ROOT/lcs-userservice.desktop"
    rm -f "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
    rm -f "$LCS_AUTOSTART_ROOT/lmn-user-client.desktop"
 
@@ -525,6 +497,7 @@ install_client() {
 
 remove_client_integration() {
    rm -f "$LCS_AUTOSTART_ROOT/lcs-client.desktop"
+   rm -f "$LCS_AUTOSTART_ROOT/lcs-userservice.desktop"
    rm -f "$LCS_AUTOSTART_ROOT/lmn-user-client.desktop"
    rm -f "$LCS_APPLICATIONS_ROOT/lcs-client.desktop"
 }
@@ -546,6 +519,7 @@ reset_identity() {
 
 uninstall_client() {
    pkill -f "$LCS_CLIENT_ROOT/user_client.py" 2>/dev/null || true
+   pkill -f "$LCS_CLIENT_ROOT/user_service.py" 2>/dev/null || true
    remove_client_integration
    rm -rf "$LCS_CLIENT_ROOT"
    echo "LCS-User-Client entfernt."
