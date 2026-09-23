@@ -2,10 +2,7 @@ import json
 import os
 import secrets
 import time
-import tarfile
-import hashlib
 import io
-import zipfile
 from functools import wraps
 from pathlib import Path
 
@@ -18,10 +15,7 @@ import core
 HOST = os.environ.get('LCS_SERVER_HOST', '127.0.0.1')
 PORT = int(os.environ.get('LCS_SERVER_PORT', '5000'))
 BASE = Path(__file__).resolve().parent
-RELEASES = Path(os.environ.get('LCS_RELEASES_DIR', str(BASE / 'releases')))
-MANIFEST = Path(os.environ.get('LCS_MANIFEST_FILE', str(BASE / 'data/bootstrap-manifest.json')))
 MAX_REQUEST_BYTES = int(os.environ.get('LCS_MAX_REQUEST_BYTES', str(2 * 1024 * 1024)))
-SOURCE_ROOT = Path(os.environ.get('LCS_SOURCE_ROOT', '/opt/lcs'))
 ADMIN_USERS = {value.strip() for value in os.environ.get('LCS_ADMIN_USERS', '').split(',') if value.strip()}
 
 core.init_db()
@@ -66,89 +60,6 @@ def format_json(value):
 def bearer():
    value = request.headers.get('Authorization', '')
    return value[7:] if value.startswith('Bearer ') else ''
-
-
-def load_manifest():
-   if not MANIFEST.exists():
-      return {'generation': 0, 'capabilities': []}
-   return json.loads(MANIFEST.read_text(encoding='utf-8'))
-
-
-def load_capability_for_editor(capability_id):
-   cap = next((item for item in load_manifest().get('capabilities', [])
-               if item.get('id') == capability_id), None)
-   if not cap:
-      raise ValueError('Aktion nicht gefunden')
-   archive = RELEASES / str(cap.get('filename', ''))
-   if not archive.is_file() or archive.parent != RELEASES:
-      raise ValueError('Aktionspaket nicht gefunden')
-   with zipfile.ZipFile(archive) as package:
-      try:
-         packaged_manifest = json.loads(package.read('manifest.json').decode('utf-8'))
-         entrypoint = str(packaged_manifest.get('entrypoint', 'action.py'))
-         code = package.read(entrypoint).decode('utf-8')
-      except (KeyError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-         raise ValueError('Aktionspaket kann nicht im Editor geöffnet werden') from exc
-   packaged_manifest.update(cap)
-   packaged_manifest['parameter_example'] = packaged_manifest.get('parameter_example') or {}
-   packaged_manifest['code'] = code
-   return packaged_manifest
-
-
-def write_manifest(payload):
-   tmp = MANIFEST.with_suffix('.tmp')
-   tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-   os.replace(tmp, MANIFEST)
-
-
-def publish_capability(source):
-   manifest_file = source / 'manifest.json'
-   cap = json.loads(manifest_file.read_text(encoding='utf-8'))
-   capability_id = str(cap.get('id', ''))
-   if not capability_id or any(char not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for char in capability_id):
-      raise ValueError('Ungültige Capability-ID')
-   if cap.get('scope') not in ('system', 'user'):
-      raise ValueError('Scope muss system oder user sein')
-   RELEASES.mkdir(parents=True, exist_ok=True)
-   filename = '%s-%s.zip' % (capability_id, cap['version'])
-   archive = RELEASES / filename
-   with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as package:
-      for path in sorted(source.rglob('*')):
-         if path.is_file() and '__pycache__' not in path.parts:
-            package.write(path, path.relative_to(source).as_posix())
-   item = {key: cap.get(key) for key in ('id', 'version', 'title', 'description', 'scope',
-           'tags', 'triggers', 'timeout', 'requires_password', 'conditions', 'on_login_credentials',
-           'user_executable', 'parameter_example') if cap.get(key) is not None}
-   item.update(filename=filename, sha256=hashlib.sha256(archive.read_bytes()).hexdigest())
-   payload = load_manifest()
-   payload['capabilities'] = [entry for entry in payload.get('capabilities', []) if entry.get('id') != capability_id]
-   payload['capabilities'].append(item)
-   payload['capabilities'].sort(key=lambda entry: entry['id'])
-   bump_generation(payload)
-
-
-def bump_generation(payload=None):
-   payload = payload or load_manifest()
-   payload['generation'] = int(payload.get('generation', 0)) + 1
-   write_manifest(payload)
-
-
-def load_manifest_for_device(device):
-   payload = load_manifest()
-   selected = []
-   trigger_map = {
-      'startup': [{'type': 'startup'}],
-      'hourly': [{'type': 'interval', 'seconds': 3600}],
-      'daily': [{'type': 'daily', 'at': '00:00'}],
-   }
-   for capability in payload.get('capabilities', []):
-      assignment = core.capability_assignment_for_device(device['id'], capability['id'])
-      if not assignment['enabled']:
-         continue
-      capability = dict(capability)
-      capability['triggers'] = trigger_map.get(assignment.get('execution'), [])
-      selected.append(capability)
-   return {'generation': payload.get('generation', 0), 'capabilities': selected}
 
 
 def device():
@@ -227,7 +138,7 @@ def dashboard_data():
       }
       item['info_items'] = [
          {'label': labels.get(key, key.replace('_', ' ').title()), 'value': value}
-         for key, value in item['hardware'].items()
+         for key, value in item['hardware'].items() if key != 'capabilities'
       ]
    platform_labels = {'windows': 'Win', 'linux': 'Lin', 'linbo': 'Lbo'}
    for item in devices:
@@ -301,61 +212,25 @@ def render_admin(new_token=None, editor=None, page='overview'):
           item.get('template_device_id') == token['template_device_id'] and
           item['id'] != token['template_device_id']) or
          (token['token_type'] != 'template' and token['group_name'] in (item.get('groups') or '').split(', '))]
-   manifest = load_manifest()
-   generation = int(manifest.get('generation', 0))
-   for capability in manifest.get('capabilities', []):
-      installed, pending = [], []
-      for assignment in (item for item in assignments if item['capability_id'] == capability['id'] and item['enabled']):
-         targets = devices if assignment['target_type'] == 'all' else (
-            [device_by_id[assignment['target_id']]] if assignment['target_type'] in ('device', 'template') and assignment['target_id'] in device_by_id else
-            [item for item in devices if assignment['target_type'] == 'group' and assignment['target_id'] in (item.get('groups') or '').split(', ')])
-         for target in targets:
-            bucket = installed if int(target.get('stack_generation') or 0) >= generation else pending
-            if target not in bucket:
-               bucket.append(target)
-      capability['installed_clients'], capability['pending_clients'] = installed, pending
+   # The server only displays capabilities reported by installed clients.
+   capability_by_id = {}
    for device in devices:
-      device['capability_states'] = []
-      device['executable_capabilities'] = []
-      for capability in manifest.get('capabilities', []):
-         assigned = core.capability_enabled_for_device(device['id'], capability['id'])
-         installed = device in capability['installed_clients']
-         device['capability_states'].append({
-            'id': capability['id'], 'title': capability['title'],
-            'assigned': assigned, 'installed': assigned and installed,
-         })
-         if assigned and capability.get('scope', 'system') == 'system':
-            device['executable_capabilities'].append({
-               'id': capability['id'], 'title': capability['title'],
-               'parameters': capability.get('parameter_example') or {},
-            })
-      device['pending_task_count'] = sum(state['assigned'] and not state['installed']
-                                         for state in device['capability_states'])
+      reported = device.get('hardware', {}).get('capabilities', [])
+      device['executable_capabilities'] = [dict(item) for item in reported]
+      device['capability_states'] = [
+         {'id': item['id'], 'title': item.get('title', item['id']), 'assigned': True, 'installed': True}
+         for item in reported
+      ]
+      device['pending_task_count'] = 0
+      for item in reported:
+         capability_by_id[item['id']] = dict(item)
+   manifest = {'generation': 0, 'capabilities': sorted(capability_by_id.values(), key=lambda item: item['id'])}
    for group in groups:
       members = [device for device in devices if group['name'] in (device.get('groups') or '').split(', ')]
       group['members'] = members
       group['capability_states'] = []
-      for capability in manifest.get('capabilities', []):
-         assignment = next((item for item in assignments
-            if item['capability_id'] == capability['id'] and item['target_type'] == 'group'
-            and item['target_id'] == group['name']), None)
-         assigned = bool(assignment and assignment['enabled'])
-         installed_count = sum(device in capability['installed_clients'] for device in members) if assigned else 0
-         group['capability_states'].append({
-            'id': capability['id'], 'title': capability['title'], 'assigned': assigned,
-            'installed_count': installed_count, 'member_count': len(members),
-         })
    all_group = {'name': 'alle', 'description': 'Alle Clients', 'device_count': len(devices),
                 'members': devices, 'virtual': True, 'capability_states': []}
-   for capability in manifest.get('capabilities', []):
-      assignment = next((item for item in assignments
-         if item['capability_id'] == capability['id'] and item['target_type'] == 'all'), None)
-      assigned = bool(assignment and assignment['enabled'])
-      all_group['capability_states'].append({
-         'id': capability['id'], 'title': capability['title'], 'assigned': assigned,
-         'installed_count': len(capability['installed_clients']) if assigned else 0,
-         'member_count': len(devices),
-      })
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=manifest,
                           now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
@@ -364,46 +239,7 @@ def render_admin(new_token=None, editor=None, page='overview'):
 
 @app.get('/health')
 def health():
-   return jsonify(ok=True, version='0.6')
-
-
-@app.get('/api/v1/bootstrap/manifest')
-def bootstrap_manifest():
-   authenticated = device()
-   if not authenticated:
-      return jsonify(error='unauthorized'), 401
-   return jsonify(load_manifest_for_device(authenticated))
-
-
-@app.get('/api/v1/bootstrap/package/<path:filename>')
-def bootstrap_package(filename):
-   authenticated = device()
-   if not authenticated:
-      return jsonify(error='unauthorized'), 401
-   if '/' in filename or '\\' in filename or filename.startswith('.'):
-      return jsonify(error='invalid filename'), 400
-   allowed = {cap.get('filename') for cap in load_manifest_for_device(authenticated).get('capabilities', [])}
-   if filename not in allowed:
-      return jsonify(error='package not assigned to device'), 403
-   target = RELEASES / filename
-   if not target.is_file():
-      return jsonify(error='package not found'), 404
-   return send_file(target, mimetype='application/zip', conditional=True)
-
-
-@app.get('/api/v1/update/source')
-def update_source():
-   if not device():
-      return jsonify(error='unauthorized'), 401
-   if not (SOURCE_ROOT / 'install.sh').is_file():
-      return jsonify(error='server source tree unavailable'), 503
-   archive = RELEASES / 'lcs-source.tar.gz'
-   with tarfile.open(archive, 'w:gz') as output:
-      for name in ('install.sh', 'install.ps1', 'VERSION', 'server', 'system', 'client'):
-         path = SOURCE_ROOT / name
-         if path.exists():
-            output.add(path, arcname=name, filter=lambda item: None if '__pycache__' in item.name else item)
-   return send_file(archive, mimetype='application/gzip', conditional=True)
+   return jsonify(ok=True, version='0.7')
 
 
 @app.get('/api/v1/agent/poll')
@@ -484,15 +320,7 @@ def admin_clients():
 @app.get('/admin/tasks')
 @admin_required
 def admin_tasks():
-   capability_id = request.args.get('edit', '').strip()
-   if not capability_id:
-      return render_admin(page='tasks')
-   try:
-      editor = load_capability_for_editor(capability_id)
-   except (ValueError, zipfile.BadZipFile) as exc:
-      flash(str(exc), 'error')
-      return redirect(url_for('admin_tasks') + '#capabilities')
-   return render_admin(editor=editor, page='tasks')
+   return render_admin(page='tasks')
 
 
 @app.get('/admin/tokens')
@@ -511,21 +339,13 @@ def admin_logging():
 @admin_required
 def client_status():
    devices, _, _, _, actions, _ = dashboard_data()
-   manifest = load_manifest()
-   generation = int(manifest.get('generation', 0))
    for device in devices:
-      states = []
-      executable = []
-      for capability in manifest.get('capabilities', []):
-         assigned = core.capability_enabled_for_device(device['id'], capability['id'])
-         installed = assigned and int(device.get('stack_generation') or 0) >= generation
-         states.append({'id': capability['id'], 'title': capability['title'],
-                        'assigned': assigned, 'installed': installed})
-         if assigned and capability.get('scope', 'system') == 'system':
-            executable.append({'id': capability['id'], 'title': capability['title'],
-                               'parameters': capability.get('parameter_example') or {}})
-      device['capability_states'] = states
-      device['executable_capabilities'] = executable
+      reported = device.get('hardware', {}).get('capabilities', [])
+      device['capability_states'] = [
+         {'id': item['id'], 'title': item.get('title', item['id']), 'assigned': True, 'installed': True}
+         for item in reported
+      ]
+      device['executable_capabilities'] = [dict(item) for item in reported]
    return jsonify(devices=[{
       'id': item['id'],
       'online': item['online'],
@@ -581,8 +401,7 @@ def save_group():
          conn.executemany('INSERT INTO device_groups(group_name, device_id) VALUES(?,?)',
                           [(name, device_id) for device_id in selected])
    if original_name:
-      bump_generation()
-   flash('Gruppe gespeichert.', 'success')
+      flash('Gruppe gespeichert.', 'success')
    return redirect(url_for('admin_clients') + '#devices')
 
 
@@ -597,7 +416,6 @@ def group_membership():
          conn.execute('DELETE FROM device_groups WHERE group_name=? AND device_id=?', (group, device_id))
       else:
          conn.execute('INSERT OR IGNORE INTO device_groups(group_name, device_id) VALUES(?,?)', (group, device_id))
-   bump_generation()
    flash('Gruppenzuordnung aktualisiert.', 'success')
    return redirect(url_for('admin_clients') + '#devices')
 
@@ -639,7 +457,6 @@ def delete_group(name):
       conn.execute('DELETE FROM action_templates WHERE group_name=?', (name,))
       conn.execute("DELETE FROM capability_assignments WHERE target_type='group' AND target_id=?", (name,))
       conn.execute('DELETE FROM groups WHERE name=?', (name,))
-   bump_generation()
    flash('Gruppe gelöscht.', 'success')
    return redirect(url_for('admin_clients') + '#devices')
 
@@ -723,91 +540,6 @@ def delete_token(token_id):
    return redirect(url_for('admin_tokens') + '#tokens')
 
 
-@app.post('/admin/capability-editor')
-@admin_required
-def capability_editor():
-   check_csrf()
-   try:
-      capability_id = request.form.get('id', '').strip().lower()
-      if not capability_id or any(char not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for char in capability_id):
-         raise ValueError('Ungültige Capability-ID')
-      version = request.form.get('version', '1.0.0').strip()
-      source = RELEASES / 'editor' / capability_id
-      source.mkdir(parents=True, exist_ok=True)
-      try:
-         manifest = load_capability_for_editor(capability_id)
-      except (ValueError, zipfile.BadZipFile):
-         manifest = {}
-      for generated_key in ('code', 'filename', 'sha256'):
-         manifest.pop(generated_key, None)
-      manifest.update({
-         'id': capability_id, 'version': version,
-         'title': request.form.get('title', '').strip() or capability_id,
-         'description': request.form.get('description', '').strip(),
-         'scope': request.form.get('scope', 'system'),
-         'user_executable': request.form.get('user_executable') == '1',
-         'timeout': max(1, int(request.form.get('timeout', '120'))),
-         'entrypoint': 'action.py',
-         'parameter_example': json.loads(request.form.get('parameter_example', '{}')),
-      })
-      (source / 'manifest.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-      (source / 'action.py').write_text(request.form.get('code', ''), encoding='utf-8')
-      publish_capability(source)
-   except (ValueError, KeyError, json.JSONDecodeError) as exc:
-      flash(str(exc), 'error')
-   else:
-      flash('Aktion veröffentlicht. Sie kann nun zugeordnet und eingeplant werden.', 'success')
-   return redirect(url_for('admin_tasks') + '#editor')
-
-
-@app.post('/admin/examples/install')
-@admin_required
-def install_examples():
-   check_csrf()
-   installed = 0
-   for source in sorted((BASE / 'examples' / 'capabilities').iterdir()):
-      if source.is_dir() and (source / 'manifest.json').is_file():
-         publish_capability(source)
-         installed += 1
-   with core.db() as conn:
-      conn.execute('''INSERT INTO capability_assignments(
-            capability_id, target_type, target_id, enabled, execution)
-         VALUES('client-info-minimal', 'all', '*', 1, 'hourly')
-         ON CONFLICT(capability_id, target_type, target_id) DO NOTHING''')
-   bump_generation()
-   flash('%d Beispielaktionen veröffentlicht; bitte den gewünschten Clients zuordnen.' % installed, 'success')
-   return redirect(url_for('admin_tasks') + '#capabilities')
-
-
-@app.post('/admin/assignment')
-@admin_required
-def save_assignment():
-   check_csrf()
-   capabilities = request.form.getlist('capability')
-   enabled_states = request.form.getlist('enabled')
-   executions = request.form.getlist('execution') or ['manual'] * len(capabilities)
-   if len(capabilities) != len(enabled_states) or len(capabilities) != len(executions):
-      abort(400)
-   targets = ['device:' + device_id for device_id in request.form.getlist('device_ids')]
-   targets = targets or [request.form.get('target', '')]
-   with core.db() as conn:
-      for capability, enabled, execution in zip(capabilities, enabled_states, executions):
-         for target in targets:
-            if target == 'all':
-               target_type, target_id = 'all', '*'
-            else:
-               target_type, target_id = target.split(':', 1)
-            conn.execute('''INSERT INTO capability_assignments(
-                  capability_id, target_type, target_id, enabled, execution)
-               VALUES(?,?,?,?,?) ON CONFLICT(capability_id, target_type, target_id)
-               DO UPDATE SET enabled=excluded.enabled, execution=excluded.execution''',
-               (capability, target_type, target_id, int(enabled), execution))
-   bump_generation()
-   flash('Aufgaben-Zuordnungen gespeichert.', 'success')
-   destination = url_for('admin_clients') + '#devices' if request.form.get('next') == 'clients' else url_for('admin_tasks')
-   return redirect(destination)
-
-
 @app.post('/admin/action')
 @admin_required
 def create_action():
@@ -822,9 +554,10 @@ def create_action():
       if not devices and not remember:
          raise ValueError('Kein Client für dieses Ziel gefunden.')
       capability_id = request.form.get('capability', '')
-      capability = next((item for item in load_manifest().get('capabilities', [])
-                         if item.get('id') == capability_id), {})
-      scope = capability.get('scope', 'system')
+      if not capability_id or any(not any(cap.get('id') == capability_id for cap in
+            json.loads(target['hardware_json'] or '{}').get('capabilities', [])) for target in devices):
+         raise ValueError('Die Fähigkeit ist nicht auf allen gewählten Clients installiert.')
+      scope = 'system'
       username = request.form.get('username', '').strip()
       if remember:
          with core.db() as conn:
@@ -846,7 +579,6 @@ def create_action():
 
 
 def main():
-   RELEASES.mkdir(parents=True, exist_ok=True)
    app.run(host=HOST, port=PORT, threaded=True)
 
 

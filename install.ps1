@@ -267,7 +267,7 @@ function Write-ClientEnv {
    $passwordUsername = Read-EnvValue $ClientEnv 'LCS_PASSWORD_USERNAME'
    $defaultPassword = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
    $lines = @(
-      "LCS_SERVER=$ServerUrl", 'LCS_HEARTBEAT_SECONDS=20', 'LCS_POLL_SECONDS=10', 'LCS_SYNC_SECONDS=60',
+      "LCS_SERVER=$ServerUrl", 'LCS_HEARTBEAT_SECONDS=20', 'LCS_POLL_SECONDS=10',
       "LCS_STATE_ROOT=$StateRoot", "LCS_FEATURE_ROOT=$FeatureRoot", "LCS_TOKEN_FILE=$EnrollmentToken", 'LCS_CHANNEL=stable',
       "LCS_DEFAULT_PASSWORD=$(if ($defaultPassword) { $defaultPassword } else { 'corvi' })"
    )
@@ -325,13 +325,16 @@ function Install-UserClient {
    $shortcut.IconLocation = $icon
    $shortcut.Save()
    $runPath = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
-   $runCommand = '"{0}" "{1}"' -f $pythonw, $script
-   New-ItemProperty -Path $runPath -Name 'LCS User Client' -Value $runCommand -PropertyType String -Force | Out-Null
+   Remove-ItemProperty -Path $runPath -Name 'LCS User Client' -ErrorAction SilentlyContinue
+   $userService = Join-Path $ClientRoot 'user_service.py'
+   $runCommand = '"{0}" "{1}"' -f $pythonw, $userService
+   New-ItemProperty -Path $runPath -Name 'LCS User Service' -Value $runCommand -PropertyType String -Force | Out-Null
    Write-Host "LCS-User-Client installiert: $ClientRoot"
 }
 
 function Remove-UserClientIntegration {
    Remove-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LCS User Client' -ErrorAction SilentlyContinue
+   Remove-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LCS User Service' -ErrorAction SilentlyContinue
    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\LCS Client.lnk')
 }
 
@@ -345,18 +348,14 @@ function New-RandomHex([int]$Bytes = 32) {
 function Install-Server {
    Stop-WindowsService 'LCSServer' | Out-Null
    New-Item -ItemType Directory -Force -Path $ServerRoot | Out-Null
-   Clear-Runtime $ServerRoot @('data', 'releases', 'bootstrap-manifest.json', 'venv', 'server.env')
+   Clear-Runtime $ServerRoot @('data', 'venv', 'server.env')
    foreach ($name in @('core.py', 'server.py', 'lcsctl.py', 'requirements.txt', 'server.env.example')) {
       Copy-Item -LiteralPath (Join-Path $SourceRoot "server\$name") -Destination $ServerRoot -Force
    }
    Copy-Tree (Join-Path $SourceRoot 'server\docs') (Join-Path $ServerRoot 'docs')
-   Copy-Tree (Join-Path $SourceRoot 'server\examples') (Join-Path $ServerRoot 'examples')
    Copy-Tree (Join-Path $SourceRoot 'server\web') (Join-Path $ServerRoot 'web')
    Copy-Tree (Join-Path $SourceRoot 'server\windows') (Join-Path $ServerRoot 'windows')
-   New-Item -ItemType Directory -Force -Path (Join-Path $ServerRoot 'data'), (Join-Path $ServerRoot 'releases') | Out-Null
-   if (-not (Test-Path (Join-Path $ServerRoot 'bootstrap-manifest.json'))) {
-      Copy-Item (Join-Path $SourceRoot 'server\bootstrap-manifest.json') $ServerRoot
-   }
+   New-Item -ItemType Directory -Force -Path (Join-Path $ServerRoot 'data') | Out-Null
    $python = New-Venv $ServerRoot
    & $python -m pip install --quiet -r (Join-Path $ServerRoot 'requirements.txt')
    if ($LASTEXITCODE) { throw 'Server-Abhängigkeiten konnten nicht installiert werden.' }
@@ -371,7 +370,6 @@ function Install-Server {
    $serverLines = @(
       "LCS_SERVER_DB=$(Join-Path $ServerRoot 'data\lcs.sqlite3')", 'LCS_SESSION_TTL=120', 'LCS_ACTION_LEASE=180',
       'LCS_ACTION_PREFETCH=86400', "LCS_SERVER_HOST=$($values.LCS_SERVER_HOST)", "LCS_SERVER_PORT=$($values.LCS_SERVER_PORT)",
-      "LCS_RELEASES_DIR=$(Join-Path $ServerRoot 'releases')", "LCS_SOURCE_ROOT=$SourceRoot", "LCS_MANIFEST_FILE=$(Join-Path $ServerRoot 'bootstrap-manifest.json')",
       "LCS_SECRET_KEY=$secret", "LCS_OIDC_DISCOVERY_URL=$($values.LCS_OIDC_DISCOVERY_URL)",
       "LCS_OIDC_CLIENT_ID=$($values.LCS_OIDC_CLIENT_ID)", "LCS_OIDC_CLIENT_SECRET=$($values.LCS_OIDC_CLIENT_SECRET)",
       "LCS_ADMIN_USERS=$($values.LCS_ADMIN_USERS)", 'LCS_MAX_REQUEST_BYTES=2097152'
@@ -389,7 +387,7 @@ function Install-Server {
 
 function Uninstall-UserClient {
    Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
-      Where-Object { $_.CommandLine -like "*$ClientRoot*user_client.py*" } |
+      Where-Object { $_.CommandLine -like "*$ClientRoot*user_client.py*" -or $_.CommandLine -like "*$ClientRoot*user_service.py*" } |
       ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
    Remove-UserClientIntegration
    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ClientRoot

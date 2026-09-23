@@ -6,22 +6,19 @@ import socket
 import struct
 import subprocess
 import sys
-import tarfile
-import tempfile
 import threading
 import time
-import urllib.request
 from pathlib import Path
 
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 
-from capability_runtime import capability_map, load_stack, run_capability, sync_stack
+from capabilities import execute as execute_capability, public_capabilities
 from common.config import env_bool, load_env
 from common.http_client import request_json
-from common.platform_info import hostname, logged_in_users
+from common.platform_info import hostname, logged_in_users, system_information
 
-VERSION = '0.6.0'
+VERSION = '0.7.0'
 
 
 def log(message, **fields):
@@ -196,9 +193,7 @@ def initialize_user(config, username='', password='', force=False, client_userna
 
 
 def user_capabilities(stack):
-   return [{'id': cap['id'], 'title': cap.get('title', cap['id']), 'description': cap.get('description', '')}
-           for cap in stack.get('capabilities', [])
-           if cap.get('scope') == 'system' and cap.get('user_executable')]
+   return [cap for cap in public_capabilities() if cap.get('user_executable')]
 
 
 def handle_user_request(config, runtime, request, peer_username=''):
@@ -208,8 +203,22 @@ def handle_user_request(config, runtime, request, peer_username=''):
       status = initialization_status(config, domain_username)
       if status.get('domain_username'):
          status['username'] = domain_username
+      information = system_information(VERSION)
+      information['capabilities'] = public_capabilities()
       return {'ok': True, 'client_enabled': runtime.get('client_enabled', False),
-              'image_source': runtime.get('image_source', False), **status}
+              'image_source': runtime.get('image_source', False), 'system': information, **status}
+   if operation == 'capabilities':
+      return {'ok': True, 'capabilities': user_capabilities(runtime['stack'])}
+   if operation == 'execute':
+      cap_id = str(request.get('capability_id', ''))
+      cap = next((item for item in public_capabilities()
+                  if item.get('id') == cap_id and item.get('user_executable')), None)
+      if not cap:
+         return {'ok': False, 'error': 'Aktion ist nicht für Benutzer freigegeben.'}
+      local_username = (domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else
+                        config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer')
+      result = execute_capability(cap_id, local_username)
+      return {'ok': True, 'result': result}
    if not runtime.get('client_enabled', False):
       return {'ok': False, 'error': 'Der Nutzerclient ist für einen Musterclient deaktiviert.'}
    if operation == 'initialize':
@@ -217,32 +226,6 @@ def handle_user_request(config, runtime, request, peer_username=''):
          return {'ok': True, 'username': domain_username}
       return initialize_user(config, str(request.get('username', '')).strip(),
                              str(request.get('password', '')), client_username=domain_username)
-   if operation == 'capabilities':
-      return {'ok': True, 'capabilities': user_capabilities(runtime['stack'])}
-   if operation == 'execute':
-      cap_id = str(request.get('capability_id', ''))
-      cap = next((item for item in runtime['stack'].get('capabilities', [])
-                  if item.get('id') == cap_id and item.get('scope') == 'system' and item.get('user_executable')), None)
-      if not cap:
-         return {'ok': False, 'error': 'Aktion ist nicht für Benutzer freigegeben.'}
-      local_username = (domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else
-                        config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer')
-      if not re.fullmatch(r'[A-Za-z0-9_.@\\-]+', local_username):
-         return {'ok': False, 'error': 'Ungültiger lokaler Benutzername.'}
-      if os.name == 'nt':
-         requested_home = str(request.get('user_home', '')).strip()
-         user_home = Path(requested_home) if requested_home else Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username
-      else:
-         import pwd
-         user_home = Path(pwd.getpwnam(local_username).pw_dir)
-      data_path = (user_data_path(config, domain_username) if config.get('LCS_USER_DATA') else
-                   (user_home / 'AppData' / 'Roaming' / 'LCS' if os.name == 'nt' else
-                    user_home / '.config' / 'lcs'))
-      result = run_capability(cap, {}, timeout=int(cap.get('timeout', 120)),
-                              context={'username': local_username, 'user_home': str(user_home),
-                                       'data_path': str(data_path)})
-      return {'ok': int(result.get('exit_code', 0)) == 0, 'result': result,
-              'error': result.get('stderr', '') if int(result.get('exit_code', 0)) else ''}
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
 
 
@@ -431,6 +414,8 @@ def enroll(config, state_dir):
          result = initialize_user(config, force=True)
          if not result.get('ok'):
             raise RuntimeError('Automatic user initialization failed: ' + result.get('error', 'unknown error'))
+         # The restored password must be verified in a fresh, non-autologin session.
+         execute_capability('logout', config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer')
       else:
          log('Sofortige Benutzereinrichtung nicht erforderlich', **user_status)
    try:
@@ -471,11 +456,14 @@ def set_hostname(hostname):
 
 
 def heartbeat(config, state, stack):
+   information = system_information(VERSION)
+   information['capabilities'] = public_capabilities()
    payload = {
       'agent_version': VERSION,
       'hostname': hostname(),
       'logged_in_users': logged_in_users(),
-      'stack_generation': int(stack.get('generation', 0)),
+      'capabilities': public_capabilities(),
+      'hardware': information,
    }
    return post_device(config, state, '/api/v1/heartbeat', payload)
 
@@ -532,61 +520,6 @@ def flush_events(config, state, state_dir):
          break
    save_json(path, remaining, 0o600)
 
-def boot_id():
-   if os.name != 'nt':
-      p = Path('/proc/sys/kernel/random/boot_id')
-      if p.exists():
-         return p.read_text().strip()
-   return str(int(time.time() - time.monotonic()))
-
-
-def trigger_due(trigger, cap, scheduler_state, now):
-   key = cap['id'] + '@' + cap['version'] + ':' + json.dumps(trigger, sort_keys=True)
-   previous = scheduler_state.get(key, {})
-   kind = trigger.get('type')
-   if kind == 'startup':
-      current_boot = boot_id()
-      if previous.get('boot_id') != current_boot:
-         return True, key, {'boot_id': current_boot, 'last_run': now}
-   elif kind == 'interval':
-      seconds = max(1, int(trigger.get('seconds', 3600)))
-      if now - int(previous.get('last_run', 0)) >= seconds:
-         return True, key, {'last_run': now}
-   elif kind == 'daily':
-      at = str(trigger.get('at', '00:00'))
-      current = time.strftime('%H:%M', time.localtime(now))
-      today = time.strftime('%Y-%m-%d', time.localtime(now))
-      if current >= at and previous.get('date') != today:
-         return True, key, {'date': today, 'last_run': now}
-   return False, key, previous
-
-
-def run_scheduled_system_capabilities(config, state, stack, state_dir):
-   scheduler_path = Path(state_dir) / 'scheduler.json'
-   scheduler = load_json(scheduler_path, {})
-   changed = False
-   now = int(time.time())
-   for cap in stack.get('capabilities', []):
-      if cap.get('scope') != 'system':
-         continue
-      for trigger in cap.get('triggers', []):
-         due, key, new_state = trigger_due(trigger, cap, scheduler, now)
-         if not due:
-            continue
-         log('Zeitgesteuerte Aktion gestartet', capability_id=cap['id'], trigger=trigger.get('type', ''))
-         try:
-            result = run_capability(cap, trigger.get('parameters', {}), timeout=int(cap.get('timeout', 120)))
-            report_event(config, state, 'scheduled_result', cap['id'], result, state_dir)
-            log('Zeitgesteuerte Aktion abgeschlossen', capability_id=cap['id'], exit_code=result.get('exit_code'))
-         except Exception as exc:
-            report_event(config, state, 'scheduled_error', cap['id'], {'error': str(exc)}, state_dir)
-            log('Zeitgesteuerte Aktion fehlgeschlagen', capability_id=cap['id'], error=str(exc))
-         scheduler[key] = new_state
-         changed = True
-   if changed:
-      save_json(scheduler_path, scheduler, 0o600)
-
-
 def save_action_result(state_dir, payload):
    path = Path(state_dir) / 'result-outbox.json'
    items = load_json(path, [])
@@ -631,7 +564,7 @@ def poll_manual_actions(config, state, stack, state_dir):
 def execute_due_actions(config, state, stack, state_dir):
    pending_path = Path(state_dir) / 'pending-actions.json'
    pending = {str(item['id']): item for item in load_json(pending_path, [])}
-   capabilities = capability_map(stack, 'system')
+   capabilities = {item['id']: item for item in public_capabilities()}
    now = int(time.time())
    completed = []
    for key, action in list(pending.items()):
@@ -655,30 +588,13 @@ def execute_due_actions(config, state, stack, state_dir):
             return
          reset_device(config, state, action.get('parameters', {}).get('reenrollment_token', ''))
          return
-      if cap_id in ('__lcs_update_git__', '__lcs_update_bundle__'):
-         try:
-            result = schedule_update(config, state, cap_id == '__lcs_update_bundle__')
-         except Exception as exc:
-            ok = False
-            result = {'error': str(exc)}
-         payload = {'action_id': action_id, 'ok': ok, 'result': result}
-         try:
-            status, _ = post_device(config, state, '/api/v1/action/result', payload)
-            if status != 200:
-               save_action_result(state_dir, payload)
-         except Exception:
-            save_action_result(state_dir, payload)
-         completed.append(key)
-         log('Aktion abgeschlossen', action_id=action_id, capability_id=cap_id, ok=ok)
-         continue
       cap = capabilities.get(cap_id)
       if not cap:
          ok = False
          result = {'error': 'system capability not available locally: ' + cap_id}
       else:
          try:
-            result = run_capability(cap, action.get('parameters', {}), timeout=int(cap.get('timeout', 120)))
-            ok = int(result.get('exit_code', 0)) == 0
+            result = execute_capability(cap_id)
          except Exception as exc:
             ok = False
             result = {'error': str(exc)}
@@ -696,43 +612,6 @@ def execute_due_actions(config, state, stack, state_dir):
    if completed:
       save_json(pending_path, list(pending.values()), 0o600)
 
-
-def schedule_update(config, state, from_server=False):
-   if os.name == 'nt':
-      raise RuntimeError('Die integrierte Aktualisierung ist derzeit nur unter Linux verfügbar')
-   source_root = Path(config.get('LCS_SOURCE_ROOT', '/opt/lcs'))
-   if from_server:
-      archive = Path(tempfile.gettempdir()) / 'lcs-update.tar.gz'
-      request = urllib.request.Request(config['LCS_SERVER'].rstrip('/') + '/api/v1/update/source',
-                                       headers=auth_headers(state))
-      context = None
-      ca_file = config.get('LCS_CA_FILE')
-      if ca_file:
-         import ssl
-         context = ssl.create_default_context(cafile=ca_file)
-      with urllib.request.urlopen(request, timeout=120, context=context) as response, archive.open('wb') as target:
-         target.write(response.read())
-      with tarfile.open(archive, 'r:gz') as package:
-         for member in package.getmembers():
-            if member.name.startswith('/') or '..' in Path(member.name).parts:
-               raise RuntimeError('Unsicherer Pfad im Update-Paket')
-      update = 'mkdir -p {root} && tar -xzf {archive} -C {root}'.format(
-         root=shlex_quote(str(source_root)), archive=shlex_quote(str(archive)))
-      method = 'server bundle'
-   else:
-      update = 'git -C {root} pull --ff-only'.format(root=shlex_quote(str(source_root)))
-      method = 'git pull'
-   installer = '{root}/install.sh upgrade workstation {server}'.format(
-      root=shlex_quote(str(source_root)), server=shlex_quote(config['LCS_SERVER']))
-   command = 'sleep 2; {update} && {installer}'.format(update=update, installer=installer)
-   subprocess.Popen(['/bin/systemd-run', '--unit=lcs-upgrade', '--collect', '/bin/bash', '-c', command],
-                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-   return {'message': 'update scheduled', 'method': method}
-
-
-def shlex_quote(value):
-   import shlex
-   return shlex.quote(value)
 
 def reset_device(config, state, reenrollment_token=''):
    paths = runtime_paths(config)
@@ -787,21 +666,19 @@ def run_forever(env_path=None, stop_requested=None):
    config.setdefault('LCS_FEATURE_ROOT', paths['feature_root'])
    heartbeat_interval = int(config.get('LCS_HEARTBEAT_SECONDS', '20'))
    poll_interval = int(config.get('LCS_POLL_SECONDS', '10'))
-   sync_interval = int(config.get('LCS_SYNC_SECONDS', '60'))
    state = load_state(paths['state_dir'])
    if state.get('device_id'):
       save_json(Path(paths['state_dir']) / 'device-public.json', {
          'device_id': state['device_id'],
          'image_source': bool(state.get('image_source')),
       }, 0o644)
-   stack = load_stack(config['LCS_FEATURE_ROOT'])
+   stack = {'generation': 0, 'capabilities': public_capabilities()}
    user_runtime = {'stack': stack,
                    'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
                    'image_source': bool(state.get('image_source'))}
    threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
    last_poll = 0
-   last_sync = 0
 
    while True:
       now = time.time()
@@ -850,23 +727,7 @@ def run_forever(env_path=None, stop_requested=None):
          time.sleep(1)
          continue
 
-      if now - last_sync >= sync_interval:
-         try:
-            changed, new_stack = sync_stack(config, state)
-            stack = new_stack
-            user_runtime['stack'] = stack
-            if changed:
-               report_event(config, state, 'stack_updated', '', {'generation': stack.get('generation', 0)}, paths['state_dir'])
-               log('Capability-Stack aktualisiert', generation=stack.get('generation', 0))
-            else:
-               log('Capability-Stack geprüft; keine Änderung', generation=stack.get('generation', 0))
-         except Exception as exc:
-            log('Capability-Synchronisierung nicht verfügbar; lokaler Stand bleibt aktiv', error=str(exc))
-         last_sync = now
-
-      # Lokale Trigger und bereits vorab geladene zeitgesteuerte Aktionen
-      # laufen auch dann weiter, wenn der Managementserver nicht erreichbar ist.
-      run_scheduled_system_capabilities(config, state, stack, paths['state_dir'])
+      # Bereits angenommene Befehle bleiben auch bei einem Serverausfall ausführbar.
       execute_due_actions(config, state, stack, paths['state_dir'])
 
       if now - last_poll >= poll_interval:

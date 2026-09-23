@@ -449,11 +449,12 @@ def heartbeat(device_id, token, payload):
       image_source = _device_is_template(conn, device['id'], hostname)
       conn.execute('''
          UPDATE devices SET last_seen=?, hostname=?, agent_version=?,
-            logged_in_users_json=?, stack_generation=?, is_image_source=? WHERE id=?
+            logged_in_users_json=?, hardware_json=?, stack_generation=?, is_image_source=? WHERE id=?
       ''', (
          now_ts(), hostname, payload.get('agent_version', ''),
          json.dumps(payload.get('logged_in_users', []), ensure_ascii=False),
-         int(payload.get('stack_generation', 0)), int(image_source), device['id']))
+         json.dumps(payload.get('hardware', {}), ensure_ascii=False),
+         0, int(image_source), device['id']))
    return 200, {'ok': True, 'role': 'template' if image_source else 'client',
                 'client_enabled': not image_source}
 
