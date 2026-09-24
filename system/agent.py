@@ -104,12 +104,7 @@ def refresh_initialization_status(config, runtime):
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       return
    status = initialization_status(config)
-   previous = runtime.get('initialization_status')
    runtime['initialization_status'] = status
-   if status != previous:
-      log('Status der Benutzereinrichtung ermittelt',
-          profile_path=str(user_profile_path(config)),
-          marker_path=str(user_marker_path(config)), **status)
 
 
 def shadow_entry(username):
@@ -227,6 +222,7 @@ def handle_user_request(config, runtime, request, peer_username=''):
    if operation == 'status':
       if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
          status = initialization_status(config, domain_username)
+         runtime['initialization_status'] = status
       else:
          status = runtime.get('initialization_status') or initialization_status(config)
       if status.get('domain_username'):
@@ -248,13 +244,14 @@ def handle_user_request(config, runtime, request, peer_username=''):
                         config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer')
       result = execute_capability(cap_id, local_username)
       return {'ok': True, 'result': result}
-   if not runtime.get('client_enabled', False):
-      return {'ok': False, 'error': 'Der Nutzerclient ist für einen Musterclient deaktiviert.'}
    if operation == 'initialize':
       profile_username = domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else ''
       result = initialize_user(config, str(request.get('username', '')).strip(),
                                str(request.get('password', '')), client_username=profile_username)
-      refresh_initialization_status(config, runtime)
+      if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+         runtime['initialization_status'] = initialization_status(config, profile_username)
+      else:
+         refresh_initialization_status(config, runtime)
       return result
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
 
@@ -437,17 +434,6 @@ def enroll(config, state_dir):
    save_state(state_dir, state)
    log('Registrierung gespeichert', device_id=state['device_id'], hostname=registered_hostname,
        image_source=state['image_source'])
-   if not state['image_source']:
-      user_status = initialization_status(config)
-      if user_status['profile_exists'] and os.name != 'nt':
-         log('Sofortige Benutzereinrichtung nach Registrierung gestartet')
-         result = initialize_user(config, force=True)
-         if not result.get('ok'):
-            raise RuntimeError('Automatic user initialization failed: ' + result.get('error', 'unknown error'))
-         # The restored password must be verified in a fresh, non-autologin session.
-         execute_capability('logout', config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer')
-      else:
-         log('Sofortige Benutzereinrichtung nicht erforderlich', **user_status)
    try:
       if not state['image_source']:
          token_path.unlink(missing_ok=True)
@@ -717,6 +703,8 @@ def run_forever(env_path=None, stop_requested=None):
    user_runtime = {'stack': stack,
                    'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
                    'image_source': bool(state.get('image_source')), 'ready': False}
+   if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+      user_runtime['initialization_status'] = {'initialization_required': True}
    refresh_initialization_status(config, user_runtime)
    threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
@@ -729,6 +717,13 @@ def run_forever(env_path=None, stop_requested=None):
       if stop_requested and stop_requested():
          log('Dienststopp angefordert')
          return
+
+      # Die lokale Nutzereinrichtung hat immer Vorrang vor Registrierung und
+      # Serverbetrieb und bleibt dadurch auch ohne Netzwerk vollständig nutzbar.
+      if user_runtime.get('initialization_status', {}).get('initialization_required'):
+         user_runtime['ready'] = False
+         time.sleep(1)
+         continue
 
       current_hostname = socket.gethostname()
       if state.get('hostname') and state['hostname'].lower() != current_hostname.lower():

@@ -1,5 +1,4 @@
 """Minimal login helper for the one-time local account setup."""
-import logging
 import os
 import sys
 import time
@@ -13,71 +12,26 @@ from common.config import load_env
 from common.service_client import request
 
 
-LOGGER = logging.getLogger('lcs.userservice')
-
-
-def configure_logging():
-   stream = sys.stdout
-   if stream is None and os.name == 'nt':
-      import ctypes
-
-      ctypes.windll.kernel32.AttachConsole(-1)
-      try:
-         stream = open('CONOUT$', 'w', encoding='utf-8', buffering=1)
-      except OSError:
-         pass
-   if stream is None:
-      return
-   logging.basicConfig(
-      level=logging.DEBUG,
-      format='%(asctime)s %(levelname)s pid=%(process)d thread=%(threadName)s %(message)s',
-      stream=stream,
-      force=True,
-   )
-
-
 def config_path():
    default = str(Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'LCS' / 'client.env') if os.name == 'nt' else '/opt/lcs-service/client.env'
    return Path(os.environ.get('LCS_CONFIG', default))
 
 
 def run_once(config):
-   attempt = 0
-   LOGGER.debug('Warte auf eine Einrichtungsanforderung des Systemdienstes')
    while True:
-      attempt += 1
       try:
-         LOGGER.debug('Statusabfrage %d wird gesendet', attempt)
          status = request(config, 'status')
-         LOGGER.debug('Statusantwort %d empfangen: %r', attempt, status)
-         # Beim Windows-Login kann der Helfer den Dienst erreichen, bevor dieser
-         # die geklonte Geräteidentität geprüft und neu registriert hat.
-         if (status.get('runtime_ready', True) and status.get('client_enabled')
-               and status.get('initialization_required')):
-            LOGGER.info('Einrichtungsanforderung erkannt')
+         if status.get('initialization_required'):
             break
-         if not status.get('runtime_ready', True):
-            reason = 'Systemdienst registriert den Rechner noch'
-         elif not status.get('client_enabled'):
-            reason = ('Nutzereinrichtung ist auf dem Musterclient gesperrt' if status.get('image_source')
-                      else 'Nutzerclient ist noch nicht freigegeben')
-         else:
-            reason = 'Benutzerprofil ist auf diesem Rechner bereits eingerichtet'
-         LOGGER.debug('%s; nächste Abfrage in 2 Sekunden', reason)
       except Exception:
-         LOGGER.exception('Statusabfrage %d fehlgeschlagen; neuer Versuch in 2 Sekunden', attempt)
+         pass
       time.sleep(2)
    # Linux can restore a saved shadow record without asking the user anything.
    if status.get('profile_exists') and not status.get('password_required'):
-      LOGGER.info('Gespeichertes Profil wird ohne Dialog wiederhergestellt')
       result = request(config, 'initialize')
-      LOGGER.debug('Antwort der Profilwiederherstellung: %r', result)
       if result.get('ok'):
-         LOGGER.info('Profil wiederhergestellt; Abmeldung wird angefordert')
          request(config, 'execute', capability_id='logout')
          return 0
-      LOGGER.error('Profilwiederherstellung fehlgeschlagen: %s', result.get('error', 'unbekannter Fehler'))
-   LOGGER.debug('Einrichtungsdialog wird erstellt')
    root = tk.Tk()
    existing = status.get('profile_exists')
    domain_user = status.get('domain_username')
@@ -101,20 +55,14 @@ def run_once(config):
       username.configure(state='disabled')
 
    def submit():
-      LOGGER.info('Einrichtung wurde im Dialog bestätigt; Benutzername=%r, Domänenmodus=%s',
-                  username.get().strip(), bool(domain_user))
       result = request(config, 'initialize', username=username.get().strip(), password=password.get())
       password.delete(0, tk.END)
-      LOGGER.debug('Antwort der Benutzereinrichtung: %r', result)
       if not result.get('ok'):
-         LOGGER.error('Benutzereinrichtung fehlgeschlagen: %s', result.get('error', 'unbekannter Fehler'))
          messagebox.showerror(root.title(), result.get('error', 'Einrichtung fehlgeschlagen.'))
          return
-      LOGGER.info('Benutzereinrichtung erfolgreich')
       root.withdraw()
       try:
          if not domain_user:
-            LOGGER.info('Abmeldung wird angefordert')
             request(config, 'execute', capability_id='logout')
       finally:
          root.destroy()
@@ -123,38 +71,18 @@ def run_once(config):
    button = tk.Button(frame, text=button_text, command=submit)
    button.grid(row=password_row + 1, column=0, columnspan=2, sticky='e', pady=(14, 0))
    password.bind('<Return>', lambda _event: submit())
-
-   def hide_dialog():
-      LOGGER.debug('Schließen des Dialogs angefordert; Dialog wird minimiert')
-      root.iconify()
-
-   root.protocol('WM_DELETE_WINDOW', hide_dialog)
-   LOGGER.info('Einrichtungsdialog wird angezeigt; Profil vorhanden=%s, Domänenmodus=%s',
-               bool(existing), bool(domain_user))
+   root.protocol('WM_DELETE_WINDOW', root.iconify)
    root.mainloop()
-   LOGGER.debug('Einrichtungsdialog wurde beendet')
    return 0
 
 
 def main():
-   path = config_path()
-   configure_logging()
-   LOGGER.info('LCS-Nutzerdienst gestartet; Plattform=%s, Python=%s, Konfiguration=%s',
-               sys.platform, sys.version.replace('\n', ' '), path)
-   config = load_env(path)
-   LOGGER.debug('Konfiguration geladen; Schlüssel=%s, Socket=%s', sorted(config),
-                config.get('LCS_USER_SOCKET', r'\\.\pipe\lcs-user' if os.name == 'nt' else '/run/lcs/user.sock'))
+   config = load_env(config_path())
    if os.name != 'nt':
       return run_once(config)
    while True:
-      LOGGER.debug('Windows-Warteschleife wird gestartet')
       run_once(config)
-      LOGGER.debug('Einrichtungsdurchlauf beendet; warte erneut auf Anforderungen')
 
 
 if __name__ == '__main__':
-   try:
-      raise SystemExit(main())
-   except Exception:
-      LOGGER.exception('LCS-Nutzerdienst wurde unerwartet beendet')
-      raise
+   raise SystemExit(main())
