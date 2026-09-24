@@ -120,7 +120,8 @@
       const selectedVisible = visible.filter(row => row.querySelector('.client-select').checked).length;
       document.querySelector('#client-selection-count').textContent = selected.length
          ? `${selected.length} Client${selected.length === 1 ? '' : 's'} ausgewählt` : 'Keine Clients ausgewählt';
-      document.querySelector('#manage-tasks-selected').disabled = selected.length === 0;
+      const manageTasksButton = document.querySelector('#manage-tasks-selected');
+      if (manageTasksButton) manageTasksButton.disabled = selected.length === 0;
       document.querySelector('#execute-selected').disabled = selected.length === 0;
       selectionToggle.checked = visible.length > 0 && selectedVisible === visible.length;
       selectionToggle.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
