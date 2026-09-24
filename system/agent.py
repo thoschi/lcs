@@ -82,8 +82,11 @@ def user_marker_path(config, username=''):
 
 def initialization_status(config, local_username=''):
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
-      return {'profile_exists': False, 'username': '', 'initialization_required': False,
-              'password_required': False, 'domain_username': True}
+      profile = load_json(user_profile_path(config, local_username), {})
+      profile_exists = profile.get('username') == local_username
+      return {'profile_exists': profile_exists, 'username': local_username,
+              'initialization_required': not profile_exists,
+              'password_required': not profile_exists, 'domain_username': True}
    profile = load_json(user_profile_path(config, local_username), {})
    try:
       user_marker = user_marker_path(config, local_username).read_text(encoding='utf-8').strip()
@@ -153,6 +156,15 @@ def disable_autologin():
 
 def initialize_user(config, username='', password='', force=False, client_username=''):
    profile_path = user_profile_path(config, client_username)
+   if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+      status = initialization_status(config, client_username)
+      if not force and not status['initialization_required']:
+         return {'ok': True, 'username': client_username}
+      if not client_username or not password:
+         return {'ok': False, 'error': 'Schulnetz-Passwort ist erforderlich.'}
+      save_json(profile_path, {'username': client_username}, 0o600)
+      log('Domänenbenutzereinrichtung abgeschlossen', username=client_username)
+      return {'ok': True, 'username': client_username}
    local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
    status = initialization_status(config, client_username)
    profile = load_json(profile_path, {})
@@ -223,8 +235,6 @@ def handle_user_request(config, runtime, request, peer_username=''):
    if not runtime.get('client_enabled', False):
       return {'ok': False, 'error': 'Der Nutzerclient ist für einen Musterclient deaktiviert.'}
    if operation == 'initialize':
-      if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
-         return {'ok': True, 'username': domain_username}
       return initialize_user(config, str(request.get('username', '')).strip(),
                              str(request.get('password', '')), client_username=domain_username)
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
