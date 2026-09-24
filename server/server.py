@@ -435,7 +435,29 @@ def generalize_device(device_id):
    except ValueError as exc:
       flash(str(exc), 'error')
    else:
-      flash('Generalisierung eingeplant. Ein neuer einmaliger Token wird an den Client ausgeliefert.', 'success')
+      flash('Neuregistrierung eingeplant. Der Client verwirft seine lokale Identität und meldet sich erneut an.', 'success')
+   return redirect(url_for('admin_clients') + '#devices')
+
+
+@app.post('/admin/devices/rebuild')
+@admin_required
+def rebuild_devices():
+   check_csrf()
+   queued = 0
+   with core.db() as conn:
+      device_ids = [row['id'] for row in conn.execute(
+         'SELECT id FROM devices WHERE is_image_source=0').fetchall()]
+   for device_id in device_ids:
+      try:
+         reenrollment_token = core.create_reenrollment_token(device_id)
+         core.queue_action(device_id, '__lcs_reset_device__', {
+            'reenrollment_token': reenrollment_token,
+            'delete_server_data': True,
+         }, core.now_ts())
+         queued += 1
+      except ValueError:
+         continue
+   flash('%s Clients werden bei ihrem nächsten Kontakt gelöscht und neu registriert.' % queued, 'success')
    return redirect(url_for('admin_clients') + '#devices')
 
 
