@@ -1,0 +1,12 @@
+[Unit]
+Description=LCS LINBO server service
+After=network.target
+
+[Service]
+Type=simple
+EnvironmentFile=__ROOT__/linbo-server.env
+ExecStart=__ROOT__/venv/bin/python __ROOT__/server_service.py
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

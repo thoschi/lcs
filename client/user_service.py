@@ -27,6 +27,9 @@ def run_once(config):
          pass
       time.sleep(2)
    # Linux can restore a saved shadow record without asking the user anything.
+   if status.get('domain_username') and not status.get('password_required'):
+      result = request(config, 'initialize')
+      return 0 if result.get('ok') else 1
    if status.get('profile_exists') and not status.get('password_required'):
       result = request(config, 'initialize')
       if result.get('ok'):

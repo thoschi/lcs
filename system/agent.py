@@ -17,8 +17,9 @@ from capabilities import execute as execute_capability, public_capabilities
 from common.config import env_bool, load_env
 from common.http_client import request_json
 from common.platform_info import hostname, logged_in_users, system_information
+from executor import Executor
 
-VERSION = '0.7.5'
+VERSION = '0.8.0'
 
 
 def log(message, **fields):
@@ -86,7 +87,7 @@ def initialization_status(config, local_username=''):
       profile_exists = profile.get('username') == local_username
       return {'profile_exists': profile_exists, 'username': local_username,
               'initialization_required': not profile_exists,
-              'password_required': not profile_exists, 'domain_username': True}
+              'password_required': False, 'domain_username': True}
    profile = load_json(user_profile_path(config, local_username), {})
    try:
       user_marker = user_marker_path(config, local_username).read_text(encoding='utf-8').strip()
@@ -168,8 +169,8 @@ def initialize_user(config, username='', password='', force=False, client_userna
       status = initialization_status(config, client_username)
       if not force and not status['initialization_required']:
          return {'ok': True, 'username': client_username}
-      if not client_username or not password:
-         return {'ok': False, 'error': 'Schulnetz-Passwort ist erforderlich.'}
+      if not client_username:
+         return {'ok': False, 'error': 'Domänenbenutzer konnte nicht ermittelt werden.'}
       save_json(profile_path, {'username': client_username}, 0o600)
       log('Domänenbenutzereinrichtung abgeschlossen', username=client_username)
       return {'ok': True, 'username': client_username}
@@ -594,13 +595,14 @@ def execute_due_actions(config, state, stack, state_dir):
    capabilities = {item['id']: item for item in public_capabilities()}
    now = int(time.time())
    completed = []
+   executor = stack['system_executor']
+   running = stack.setdefault('running_actions', {})
    for key, action in list(pending.items()):
       if int(action.get('run_at', 0)) > now:
          continue
       action_id = action['id']
       cap_id = action['capability_id']
       log('Aktion gestartet', action_id=action_id, capability_id=cap_id)
-      ok = True
       if cap_id == '__lcs_reset_device__':
          payload = {'action_id': action_id, 'ok': True, 'result': {'message': 'device reset acknowledged'}}
          try:
@@ -617,14 +619,17 @@ def execute_due_actions(config, state, stack, state_dir):
          return
       cap = capabilities.get(cap_id)
       if not cap:
-         ok = False
-         result = {'error': 'system capability not available locally: ' + cap_id}
+         outcome = {'ok': False, 'error': 'system capability not available locally: ' + cap_id}
+      elif key not in running:
+         running[key] = executor.submit(action)
+         continue
       else:
-         try:
-            result = execute_capability(cap_id)
-         except Exception as exc:
-            ok = False
-            result = {'error': str(exc)}
+         outcome = executor.take(running[key])
+         if outcome is None:
+            continue
+         running.pop(key, None)
+      ok = outcome.get('ok', False)
+      result = outcome.get('result', {'error': outcome.get('error', 'Aktion fehlgeschlagen.')})
       payload = {'action_id': action_id, 'ok': ok, 'result': result}
       try:
          status, _ = post_device(config, state, '/api/v1/action/result', payload)
@@ -699,7 +704,12 @@ def run_forever(env_path=None, stop_requested=None):
          'device_id': state['device_id'],
          'image_source': bool(state.get('image_source')),
       }, 0o644)
-   stack = {'generation': 0, 'capabilities': public_capabilities()}
+   stack = {
+      'generation': 0,
+      'capabilities': public_capabilities(),
+      'system_executor': Executor('system-executor', lambda action: execute_capability(
+         action['capability_id'], parameters=action.get('parameters', {}))),
+   }
    user_runtime = {'stack': stack,
                    'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
                    'image_source': bool(state.get('image_source')), 'ready': False}
