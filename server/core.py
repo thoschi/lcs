@@ -75,6 +75,35 @@ def _migrate_devices(conn):
    conn.execute('ALTER TABLE devices_v03 RENAME TO devices')
 
 
+def _merge_duplicate_devices(conn):
+   duplicates = conn.execute('''
+      SELECT lower(hostname) AS normalized_hostname
+      FROM devices GROUP BY lower(hostname) HAVING COUNT(*) > 1
+   ''').fetchall()
+   for duplicate in duplicates:
+      rows = conn.execute('''SELECT id FROM devices WHERE lower(hostname)=?
+         ORDER BY last_seen DESC, first_seen DESC, id DESC''',
+         (duplicate['normalized_hostname'],)).fetchall()
+      keep_id = rows[0]['id']
+      for row in rows[1:]:
+         old_id = row['id']
+         conn.execute('''INSERT OR IGNORE INTO device_groups(group_name, device_id)
+            SELECT group_name, ? FROM device_groups WHERE device_id=?''', (keep_id, old_id))
+         conn.execute('''INSERT OR IGNORE INTO capability_assignments(
+            capability_id, target_type, target_id, enabled, execution)
+            SELECT capability_id, target_type, ?, enabled, execution
+            FROM capability_assignments WHERE target_type='device' AND target_id=?''', (keep_id, old_id))
+         conn.execute('UPDATE sessions SET device_id=? WHERE device_id=?', (keep_id, old_id))
+         conn.execute('UPDATE actions SET device_id=? WHERE device_id=?', (keep_id, old_id))
+         conn.execute('UPDATE actions SET execution_device_id=? WHERE execution_device_id=?', (keep_id, old_id))
+         conn.execute('UPDATE events SET device_id=? WHERE device_id=?', (keep_id, old_id))
+         conn.execute('UPDATE devices SET template_device_id=? WHERE template_device_id=?', (keep_id, old_id))
+         conn.execute('UPDATE enrollment_tokens SET template_device_id=? WHERE template_device_id=?', (keep_id, old_id))
+         conn.execute('DELETE FROM device_groups WHERE device_id=?', (old_id,))
+         conn.execute("DELETE FROM capability_assignments WHERE target_type='device' AND target_id=?", (old_id,))
+         conn.execute('DELETE FROM devices WHERE id=?', (old_id,))
+
+
 def init_db():
    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
    with db() as conn:
@@ -203,6 +232,7 @@ def init_db():
       assignment_columns = {row['name'] for row in conn.execute('PRAGMA table_info(capability_assignments)').fetchall()}
       if 'execution' not in assignment_columns:
          conn.execute("ALTER TABLE capability_assignments ADD COLUMN execution TEXT NOT NULL DEFAULT 'manual'")
+      _merge_duplicate_devices(conn)
       conn.executescript('''
          CREATE INDEX IF NOT EXISTS idx_actions_poll
             ON actions(scope, status, run_at, device_id);
@@ -214,6 +244,8 @@ def init_db():
             ON device_audit_log(created_at DESC, id DESC);
          CREATE INDEX IF NOT EXISTS idx_devices_hostname
             ON devices(hostname COLLATE NOCASE);
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_unique_hostname
+            ON devices(lower(hostname));
       ''')
       conn.execute('''UPDATE enrollment_tokens SET template_device_id=COALESCE((
          SELECT id FROM devices
@@ -351,12 +383,10 @@ def enroll(payload):
       ''', (supplied_hash,)).fetchone()
       if not reusable:
          return 403, {'error': 'invalid enrollment token'}
-      existing = None
-      if reusable['token_type'] == 'template' and reusable['template_device_id']:
-         existing = conn.execute('''
+      existing = conn.execute('''
          SELECT id, hostname, settings_json, template_device_id, is_image_source, token_hash
-         FROM devices WHERE lower(hostname)=lower(?) AND template_device_id=?
-         ''', (hostname, reusable['template_device_id'])).fetchone()
+         FROM devices WHERE lower(hostname)=lower(?)
+         ''', (hostname,)).fetchone()
       device_id = existing['id'] if existing else secrets.token_hex(8)
       registered_hostname = existing['hostname'] if existing else hostname
       settings_json = (existing['settings_json'] if existing else
@@ -665,9 +695,12 @@ def action_result(device_id, token, payload):
                       (json.dumps(client_info, ensure_ascii=False), device['id']))
       log_event(conn, device['id'], '', 'system', 'action_result', row['capability_id'], {'action_id': action_id, 'status': status, 'result': result})
       if row['capability_id'] == '__lcs_reset_device__' and status == 'done':
-         # Die Registrierung bleibt erhalten; nur die zurückgesetzte lokale
-         # Geräteidentität darf den Server nicht mehr verwenden.
-         conn.execute("UPDATE devices SET token_hash='' WHERE id=?", (device['id'],))
+         parameters = json.loads(row['parameters_json'] or '{}')
+         if parameters.get('delete_server_data'):
+            delete_device_data(conn, device['id'])
+         else:
+            # Die lokale Identität ist ab jetzt ungültig und wird neu registriert.
+            conn.execute("UPDATE devices SET token_hash='' WHERE id=?", (device['id'],))
    return 200, {'ok': True}
 
 
