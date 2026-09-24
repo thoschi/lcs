@@ -14,12 +14,15 @@ def main(env_path):
    state = load_state(paths['state_dir'])
    if not state.get('device_id'):
       return 0
-   status, response = post_device(config, state, '/api/v1/reset-token', {})
+   status, response = post_device(config, state, '/api/v1/reset-token', {
+      'template_hostname': state.get('template_hostname', ''),
+   })
    if status != 200 or not response.get('enrollment_token'):
       raise RuntimeError(response.get('error', 'Reset-Token konnte nicht geladen werden.'))
    token = Path(paths['token'])
    token.parent.mkdir(parents=True, exist_ok=True)
-   token.write_text(response['enrollment_token'] + '\n', encoding='utf-8')
+   template_hostname = response.get('template_hostname', state.get('template_hostname', ''))
+   token.write_text(response['enrollment_token'] + '\n' + template_hostname + '\n', encoding='utf-8')
    token.chmod(0o600)
    return 0
 

@@ -165,7 +165,7 @@ PY
 }
 
 download_enrollment_token() {
-   local password response token
+   local password response token template_hostname
    read -r -s -p "Passwort für $(hostname): " password </dev/tty
    echo
    response="$(curl -fsS "${CURL_PROXY_ARGS[@]}" -H 'Content-Type: application/json' \
@@ -175,7 +175,8 @@ download_enrollment_token() {
       exit 1
    }
    token="$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["enrollment_token"])')"
-   printf '%s\n' "$token" > "$LCS_ENROLLMENT_TOKEN"
+   template_hostname="$(printf '%s' "$response" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("template_hostname", ""))')"
+   printf '%s\n%s\n' "$token" "$template_hostname" > "$LCS_ENROLLMENT_TOKEN"
    chmod 600 "$LCS_ENROLLMENT_TOKEN"
    apply_server_settings "$response"
 }
@@ -205,7 +206,7 @@ ensure_enrollment_token() {
          return
       fi
       local current_hash response
-      current_hash="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], "rb").read().strip()).hexdigest())' "$LCS_ENROLLMENT_TOKEN")"
+      current_hash="$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1], encoding="utf-8").readline().strip().encode()).hexdigest())' "$LCS_ENROLLMENT_TOKEN")"
       response="$(curl -fsS "${CURL_PROXY_ARGS[@]}" -H 'Content-Type: application/json' \
          --data "$(python3 -c 'import json,sys; print(json.dumps({"token_hash":sys.argv[1]}))' "$current_hash")" \
          "$SERVER_URL/api/v1/token/check")" || {

@@ -218,7 +218,7 @@ function Request-EnrollmentToken {
    # Windows PowerShell kodiert String-Bodys sonst nicht zuverlässig als UTF-8.
    $body = [Text.Encoding]::UTF8.GetBytes($json)
    $response = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json; charset=utf-8' -Body $body
-   Write-Utf8 $EnrollmentToken ($response.enrollment_token + "`r`n")
+   Write-Utf8 $EnrollmentToken ($response.enrollment_token + "`r`n" + $response.template_hostname + "`r`n")
    Protect-File $EnrollmentToken
    Set-ServerSettings $response.settings
 }
@@ -240,7 +240,7 @@ function Ensure-EnrollmentToken {
    if ((Test-Path $EnrollmentToken) -and (Get-Item $EnrollmentToken).Length -gt 0) {
       Protect-File $EnrollmentToken
       if (-not $ServerUrl) { return }
-      $token = (Get-Content -Raw -LiteralPath $EnrollmentToken).Trim()
+      $token = (Get-Content -LiteralPath $EnrollmentToken -TotalCount 1).Trim()
       $bytes = [Text.Encoding]::UTF8.GetBytes($token)
       $sha256 = [Security.Cryptography.SHA256]::Create()
       try { $tokenHash = ([BitConverter]::ToString($sha256.ComputeHash($bytes))).Replace('-', '').ToLowerInvariant() }

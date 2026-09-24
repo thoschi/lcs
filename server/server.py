@@ -277,7 +277,7 @@ def agent_api(endpoint):
       'heartbeat': lambda: core.heartbeat(device_id, bearer(), payload),
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
-      'reset-token': lambda: core.reset_token(device_id, bearer()),
+      'reset-token': lambda: core.reset_token(device_id, bearer(), payload.get('template_hostname', '')),
       'device/self-delete': lambda: core.self_delete(device_id, bearer()),
       'user/login': lambda: core.user_login(payload),
       'user/heartbeat': lambda: core.user_heartbeat(bearer()),
@@ -555,13 +555,13 @@ def copy_token(token_id):
 @admin_required
 def download_token(token_id):
    with core.db() as conn:
-      token = conn.execute('SELECT name, token_value FROM enrollment_tokens WHERE id=?', (token_id,)).fetchone()
+      token = conn.execute('SELECT name, hostname, token_value FROM enrollment_tokens WHERE id=?', (token_id,)).fetchone()
    if not token:
       abort(404)
    if not token['token_value']:
       abort(409, 'Für diesen älteren Token ist keine Token-Datei verfügbar')
    safe_name = ''.join(char if char.isalnum() or char in '-_' else '-' for char in token['name']).strip('-') or 'enrollment'
-   return send_file(io.BytesIO((token['token_value'] + '\n').encode()), mimetype='text/plain',
+   return send_file(io.BytesIO((token['token_value'] + '\n' + token['hostname'] + '\n').encode()), mimetype='text/plain',
                     as_attachment=True, download_name=safe_name + '.token')
 
 

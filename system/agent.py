@@ -226,6 +226,9 @@ def handle_user_request(config, runtime, request, peer_username=''):
          runtime['initialization_status'] = status
       else:
          status = runtime.get('initialization_status') or initialization_status(config)
+      if runtime.get('image_source') or not runtime.get('role_resolved'):
+         status = dict(status)
+         status['initialization_required'] = False
       if status.get('domain_username'):
          status['username'] = domain_username
       information = system_information(VERSION)
@@ -396,14 +399,15 @@ def save_server_settings(env_path, settings):
 def read_enrollment_token(config):
    token_path = Path(runtime_paths(config)['token'])
    try:
-      return token_path.read_text(encoding='utf-8').strip(), token_path
+      lines = token_path.read_text(encoding='utf-8').splitlines()
+      return (lines[0].strip() if lines else '', lines[1].strip() if len(lines) > 1 else '', token_path)
    except Exception:
-      return '', token_path
+      return '', '', token_path
 
 
 def enroll(config, state_dir):
    current_hostname = hostname()
-   enrollment_token, token_path = read_enrollment_token(config)
+   enrollment_token, template_hostname, token_path = read_enrollment_token(config)
    log('Registrierung gestartet', hostname=current_hostname, token_file=str(token_path))
    if not enrollment_token:
       raise RuntimeError('Enrollment token missing: %s' % token_path)
@@ -431,7 +435,8 @@ def enroll(config, state_dir):
       log('Hostname wird wiederhergestellt', current=current_hostname, registered=registered_hostname)
       restart_required = set_hostname(registered_hostname)
    state = {'device_id': response['device_id'], 'device_token': response['device_token'],
-            'hostname': registered_hostname, 'image_source': bool(response.get('image_source'))}
+            'hostname': registered_hostname, 'image_source': bool(response.get('image_source')),
+            'template_hostname': template_hostname or response.get('template_hostname', '')}
    save_state(state_dir, state)
    log('Registrierung gespeichert', device_id=state['device_id'], hostname=registered_hostname,
        image_source=state['image_source'])
@@ -652,7 +657,7 @@ def reset_device(config, state, reenrollment_token=''):
        reenrollment_token=bool(reenrollment_token))
    if reenrollment_token:
       token_path.parent.mkdir(parents=True, exist_ok=True)
-      token_path.write_text(reenrollment_token + '\n', encoding='utf-8')
+      token_path.write_text(reenrollment_token + '\n' + state.get('template_hostname', '') + '\n', encoding='utf-8')
       log('Token für erneute Registrierung gespeichert', token_file=str(token_path))
       try:
          os.chmod(token_path, 0o600)
@@ -712,7 +717,8 @@ def run_forever(env_path=None, stop_requested=None):
    }
    user_runtime = {'stack': stack,
                    'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
-                   'image_source': bool(state.get('image_source')), 'ready': False}
+                   'image_source': bool(state.get('image_source')),
+                   'role_resolved': bool(state.get('device_id')), 'ready': False}
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       user_runtime['initialization_status'] = {'initialization_required': True}
    refresh_initialization_status(config, user_runtime)
@@ -728,13 +734,6 @@ def run_forever(env_path=None, stop_requested=None):
          log('Dienststopp angefordert')
          return
 
-      # Die lokale Nutzereinrichtung hat immer Vorrang vor Registrierung und
-      # Serverbetrieb und bleibt dadurch auch ohne Netzwerk vollständig nutzbar.
-      if user_runtime.get('initialization_status', {}).get('initialization_required'):
-         user_runtime['ready'] = False
-         time.sleep(1)
-         continue
-
       current_hostname = socket.gethostname()
       if state.get('hostname') and state['hostname'].lower() != current_hostname.lower():
          # Hostnamen können erst nach dem Start des geklonten Systems gesetzt werden.
@@ -742,6 +741,7 @@ def run_forever(env_path=None, stop_requested=None):
          log('Klon erkannt; lokale Geräteidentität wird verworfen', current_hostname=current_hostname)
          user_runtime['client_enabled'] = False
          user_runtime['image_source'] = False
+         user_runtime['role_resolved'] = False
          for filename in ('device.json', 'device-public.json'):
             (Path(paths['state_dir']) / filename).unlink(missing_ok=True)
 
@@ -750,11 +750,20 @@ def run_forever(env_path=None, stop_requested=None):
             state = enroll(config, paths['state_dir'])
             user_runtime['client_enabled'] = not state.get('image_source')
             user_runtime['image_source'] = bool(state.get('image_source'))
+            user_runtime['role_resolved'] = True
             log('Registrierung erfolgreich', device_id=state['device_id'], image_source=state['image_source'])
          except Exception as exc:
             log('Registrierung nicht verfügbar; erneuter Versuch folgt', error=str(exc))
             time.sleep(3)
             continue
+
+      # Erst die Registrierung unterscheidet Musterclient und normalen Client.
+      # Nur normale Clients benötigen anschließend die lokale Nutzereinrichtung.
+      if (not state.get('image_source') and
+            user_runtime.get('initialization_status', {}).get('initialization_required')):
+         user_runtime['ready'] = False
+         time.sleep(1)
+         continue
 
       user_runtime['ready'] = True
 
@@ -765,6 +774,7 @@ def run_forever(env_path=None, stop_requested=None):
                if status == 401:
                   state = {}
                   user_runtime['client_enabled'] = False
+                  user_runtime['role_resolved'] = False
                   user_runtime['ready'] = False
                   last_heartbeat = now
                   continue
@@ -789,6 +799,7 @@ def run_forever(env_path=None, stop_requested=None):
             if code == 401:
                state = {}
                user_runtime['client_enabled'] = False
+               user_runtime['role_resolved'] = False
                user_runtime['ready'] = False
                last_poll = now
                continue
@@ -802,6 +813,7 @@ def run_forever(env_path=None, stop_requested=None):
             if status == 401:
                state = {}
                user_runtime['client_enabled'] = False
+               user_runtime['role_resolved'] = False
                user_runtime['ready'] = False
                last_heartbeat = now
                continue
