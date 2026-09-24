@@ -6,7 +6,7 @@ sys.path.insert(0, str(BASE))
 
 from agent import run_forever
 
-BOOTSTRAP_VERSION = '0.7.1'
+BOOTSTRAP_VERSION = '0.7.2'
 
 
 def run(env_path=None, stop_requested=None):
