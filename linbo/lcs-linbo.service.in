@@ -1,0 +1,11 @@
+[Unit]
+Description=LCS LINBO moderator
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=__ROOT__/venv/bin/python __ROOT__/linbo/agent.py __ROOT__/client.env
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

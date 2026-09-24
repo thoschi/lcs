@@ -297,13 +297,14 @@ function Write-ClientEnv {
 function Install-SystemService {
    Require-ServerUrl
    Stop-WindowsService 'LCSService' | Out-Null
+   if ($Operation -ne 'upgrade') { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ServiceRoot }
    New-Item -ItemType Directory -Force -Path $ServiceRoot, $StateRoot, $FeatureRoot | Out-Null
    Clear-Runtime $ServiceRoot @('features', 'state', 'venv', 'client.env', 'enrollment.token')
    Copy-Tree (Join-Path $SourceRoot 'system') $ServiceRoot
    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $ServiceRoot 'linux')
    $python = New-Venv $ServiceRoot
    Install-PyWin32 $python
-   Write-ClientEnv
+   if (($Operation -ne 'upgrade') -or -not (Test-Path $ClientEnv)) { Write-ClientEnv }
    Ensure-EnrollmentToken
    $serviceScript = Join-Path $ServiceRoot 'windows\windows_service.py'
    Install-WindowsService 'LCSService' $python $serviceScript 'LCS-Systemdienst konnte nicht installiert oder aktualisiert werden.'
@@ -318,6 +319,7 @@ function Install-SystemService {
 function Install-UserClient {
    Require-ServerUrl
    Stop-UserClientProcesses
+   if ($Operation -ne 'upgrade') { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ClientRoot }
    New-Item -ItemType Directory -Force -Path $ClientRoot | Out-Null
    Clear-Runtime $ClientRoot @('venv')
    Copy-Tree (Join-Path $SourceRoot 'client') $ClientRoot
@@ -325,7 +327,7 @@ function Install-UserClient {
    $python = New-Venv $ClientRoot
    & $python -m pip install --quiet -r (Join-Path $ClientRoot 'requirements.txt')
    if ($LASTEXITCODE) { throw 'Abhängigkeiten des LCS-User-Clients konnten nicht installiert werden.' }
-   Write-ClientEnv
+   if (($Operation -ne 'upgrade') -or -not (Test-Path $ClientEnv)) { Write-ClientEnv }
    $pythonw = Join-Path $ClientRoot 'venv\Scripts\pythonw.exe'
    $script = Join-Path $ClientRoot 'user_client.py'
    $icon = Join-Path $ClientRoot 'lcs-userclient.ico'
@@ -364,6 +366,7 @@ function New-RandomHex([int]$Bytes = 32) {
 
 function Install-Server {
    Stop-WindowsService 'LCSServer' | Out-Null
+   if ($Operation -ne 'upgrade') { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ServerRoot }
    New-Item -ItemType Directory -Force -Path $ServerRoot | Out-Null
    Clear-Runtime $ServerRoot @('data', 'venv', 'server.env')
    foreach ($name in @('core.py', 'server.py', 'lcsctl.py', 'requirements.txt', 'server.env.example')) {
@@ -442,6 +445,16 @@ function Uninstall-Product {
 }
 
 function Reset-Identity {
+   Stop-WindowsService 'LCSService' | Out-Null
+   $deviceState = Join-Path $StateRoot 'device.json'
+   if (Test-Path $deviceState) {
+      $python = Join-Path $ServiceRoot 'venv\Scripts\python.exe'
+      & $python (Join-Path $ServiceRoot 'reset.py') $ClientEnv
+      if ($LASTEXITCODE) {
+         & (Join-Path $ServiceRoot 'windows\windows_service.py') start
+         throw 'Reset abgebrochen: Enrollment-Token konnte nicht vom Server geholt werden.'
+      }
+   }
    & sc.exe stop LCSService 2>$null | Out-Null
    @('device.json', 'device-public.json', 'scheduler.json', 'pending-actions.json', 'result-outbox.json', 'event-outbox.json') |
       ForEach-Object { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $StateRoot $_) }

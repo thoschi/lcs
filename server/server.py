@@ -277,6 +277,7 @@ def agent_api(endpoint):
       'heartbeat': lambda: core.heartbeat(device_id, bearer(), payload),
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
+      'reset-token': lambda: core.reset_token(device_id, bearer()),
       'device/self-delete': lambda: core.self_delete(device_id, bearer()),
       'user/login': lambda: core.user_login(payload),
       'user/heartbeat': lambda: core.user_heartbeat(bearer()),

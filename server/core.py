@@ -362,11 +362,23 @@ def create_reenrollment_token(device_id):
       token = conn.execute('''
          SELECT et.token_value FROM devices d
          JOIN enrollment_tokens et ON et.template_device_id=d.template_device_id
-         WHERE d.id=? AND et.enabled=1 AND et.token_type='template'
+         WHERE d.id=? AND d.is_image_source=0 AND d.template_device_id<>''
+            AND et.enabled=1 AND et.token_type='template'
       ''', (device_id,)).fetchone()
    if not token or not token['token_value']:
-      raise ValueError('no active template token for device: ' + device_id)
+      raise ValueError('no active enrollment token from the device template: ' + device_id)
    return token['token_value']
+
+
+def reset_token(device_id, token):
+   device = authenticate_device(device_id, token)
+   if not device:
+      return 401, {'error': 'unauthorized'}
+   try:
+      value = create_reenrollment_token(device['id'])
+   except ValueError as exc:
+      return 409, {'error': str(exc)}
+   return 200, {'enrollment_token': value}
 
 
 def enroll(payload):

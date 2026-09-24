@@ -1,9 +1,14 @@
-# LCS v0.7.2
+# LCS v0.8.0
 
 LCS verwaltet Windows- und Linux-Arbeitsplätze mit einem bewusst kleinen,
 lokal funktionsfähigen Client. Der Systemdienst enthält seine Fähigkeiten fest
 in der installierten Version. Der Server kann **keinen Code und keine Skripte**
 erstellen, verteilen oder nachladen.
+
+Die geprüfte Architektur, Betriebsmodi, Sicherheitsgrenzen und noch offenen
+Punkte sind in [`server/docs/KONZEPT-0.8.md`](server/docs/KONZEPT-0.8.md)
+dokumentiert. Systemaktionen laufen seit 0.8 über einen eigenen FIFO-Executor,
+damit Netzwerk, IPC und Heartbeats auch während einer Aktion antwortfähig bleiben.
 
 ## Komponenten
 
@@ -42,6 +47,20 @@ Windows (administrative PowerShell):
 ```powershell
 .\install.ps1 install workstation https://lcs.example
 ```
+
+LINBO-Client und der optionale Dienst auf dem LINBO-Server werden unter Linux
+separat installiert:
+
+```bash
+./install.sh install linbo https://lcs.example --token-file ./enrollment.token
+./install.sh install linbo-server
+```
+
+`upgrade` ersetzt dabei nur Programmcode; State, Enrollment-Token und `.env`
+bleiben erhalten. Eine erneute `install` entfernt dagegen vorhandene Reste der
+jeweiligen Komponente. `reset-identity` fordert zuerst authentifiziert genau den
+Enrollment-Token des zugeordneten Musterclients an und bricht bei
+Nichterreichbarkeit sicher ab.
 
 `LCS_USER_DATA` kann in der lokalen Client-Konfiguration gesetzt werden.
 `$username` oder `${username}` wird zur Laufzeit durch den lokalen

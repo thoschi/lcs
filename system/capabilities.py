@@ -18,17 +18,30 @@ CAPABILITIES = (
     'description': 'Meldet den aktuellen Benutzer ab.', 'user_executable': True},
 )
 
+LINBO_CAPABILITIES = (
+   {'id': 'linbo_sync', 'version': '1', 'title': 'LINBO synchronisieren',
+    'description': 'Synchronisiert und startet ein Betriebssystem.', 'user_executable': False},
+   {'id': 'linbo_start', 'version': '1', 'title': 'LINBO starten',
+    'description': 'Startet ein Betriebssystem.', 'user_executable': False},
+)
+
 
 def public_capabilities():
    """Return immutable metadata suitable for clients and the server."""
-   return [dict(item) for item in CAPABILITIES]
+   items = CAPABILITIES + (LINBO_CAPABILITIES if os.environ.get('LCS_RUNTIME') == 'linbo' else ())
+   return [dict(item) for item in items]
 
 
-def execute(capability_id, username=''):
+def execute(capability_id, username='', parameters=None):
    """Execute one installed operation without a shell or downloaded code."""
-   if capability_id not in {item['id'] for item in CAPABILITIES}:
+   if capability_id not in {item['id'] for item in public_capabilities()}:
       raise ValueError('Diese Fähigkeit ist lokal nicht installiert: ' + capability_id)
-   if capability_id == 'shutdown':
+   if capability_id.startswith('linbo_'):
+      os_name = str((parameters or {}).get('os', ''))
+      if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', os_name):
+         raise RuntimeError('Ungültige Betriebssystembezeichnung.')
+      command = ['linbo_cmd', '-p' if capability_id == 'linbo_sync' else '-s', os_name]
+   elif capability_id == 'shutdown':
       command = ['shutdown', '/s', '/t', '0'] if os.name == 'nt' else ['systemctl', 'poweroff']
    elif capability_id == 'reboot':
       command = ['shutdown', '/r', '/t', '0'] if os.name == 'nt' else ['systemctl', 'reboot']
@@ -49,7 +62,8 @@ def execute(capability_id, username=''):
       if not username or not re.fullmatch(r'[A-Za-z0-9_.@\\-]+', username):
          raise RuntimeError('Kein gültiger angemeldeter Benutzer gefunden.')
       command = ['loginctl', 'terminate-user', username]
-   result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+   result = subprocess.run(command, capture_output=True, text=True,
+                           timeout=3600 if capability_id.startswith('linbo_') else 15)
    if result.returncode:
       raise RuntimeError(result.stderr.strip() or result.stdout.strip() or 'Befehl fehlgeschlagen.')
    return {'message': capability_id + ' angefordert', 'platform': platform.system()}
