@@ -1,4 +1,4 @@
-# LCS v0.7.1
+# LCS v0.7.2
 
 LCS verwaltet Windows- und Linux-Arbeitsplätze mit einem bewusst kleinen,
 lokal funktionsfähigen Client. Der Systemdienst enthält seine Fähigkeiten fest
@@ -72,6 +72,9 @@ Shadow-Zeile und Autologin-Konfiguration bleiben in diesem Modus unverändert.
 Server, Systemdienst und Benutzerprogramme werden mit `install server`,
 `install service` beziehungsweise `install client` einzeln installiert. Ein
 Upgrade erfolgt entsprechend mit `upgrade` statt `install`.
+Unter Windows startet die Installation beziehungsweise das Upgrade die
+Nutzereinrichtung auch in der laufenden Sitzung neu. Danach wartet sie auf die
+Freigabe durch den Systemdienst; ein erneutes Anmelden ist nicht erforderlich.
 Beim Upgrade eines bereits aus Musterclient-Daten erzeugten Testclients wird
 kein eigener Muster-Token für dessen Hostnamen verlangt. Seine kopierte
 Identität bleibt erhalten, bis der Systemdienst den abweichenden Hostnamen

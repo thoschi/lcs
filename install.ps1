@@ -317,6 +317,7 @@ function Install-SystemService {
 
 function Install-UserClient {
    Require-ServerUrl
+   Stop-UserClientProcesses
    New-Item -ItemType Directory -Force -Path $ClientRoot | Out-Null
    Clear-Runtime $ClientRoot @('venv')
    Copy-Tree (Join-Path $SourceRoot 'client') $ClientRoot
@@ -344,6 +345,7 @@ function Install-UserClient {
    $userService = Join-Path $ClientRoot 'user_service.py'
    $runCommand = '"{0}" "{1}"' -f $pythonw, $userService
    New-ItemProperty -Path $runPath -Name 'LCS User Service' -Value $runCommand -PropertyType String -Force | Out-Null
+   Start-Process -FilePath $pythonw -ArgumentList ('"{0}"' -f $userService) -WorkingDirectory $ClientRoot
    Write-Host "LCS-User-Client installiert: $ClientRoot"
 }
 
@@ -400,10 +402,14 @@ function Install-Server {
 }
 
 
-function Uninstall-UserClient {
+function Stop-UserClientProcesses {
    Get-CimInstance Win32_Process -Filter "Name = 'python.exe' OR Name = 'pythonw.exe'" -ErrorAction SilentlyContinue |
       Where-Object { $_.CommandLine -like "*$ClientRoot*user_client.py*" -or $_.CommandLine -like "*$ClientRoot*user_service.py*" } |
       ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Uninstall-UserClient {
+   Stop-UserClientProcesses
    Remove-UserClientIntegration
    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ClientRoot
    Write-Host 'LCS-User-Client entfernt.'
