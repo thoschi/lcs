@@ -59,8 +59,10 @@ separat installiert:
 `upgrade` ersetzt dabei nur Programmcode; State, Enrollment-Token und `.env`
 bleiben erhalten. Eine erneute `install` entfernt dagegen vorhandene Reste der
 jeweiligen Komponente. `reset-identity` fordert zuerst authentifiziert genau den
-Enrollment-Token des zugeordneten Musterclients an und bricht bei
-Nichterreichbarkeit sicher ab.
+Enrollment-Token des lokal gespeicherten Musterclient-Hostnamens an und bricht
+bei Nichterreichbarkeit sicher ab. Heruntergeladene Token-Dateien enthalten
+dafür in der zweiten Zeile den Hostnamen; ältere einzeilige Dateien bleiben
+lesbar.
 
 `LCS_USER_DATA` kann in der lokalen Client-Konfiguration gesetzt werden.
 `$username` oder `${username}` wird zur Laufzeit durch den lokalen
@@ -70,10 +72,11 @@ Sitzungsbenutzer ersetzt. Standardmäßig sind dies unter Linux
 `workstation` installiert auf beiden Plattformen den privilegierten
 Systemdienst und die Nutzereinrichtung für jede lokale Anmeldung. Unter Linux
 erfolgt deren Start über den systemweiten XDG-Autostart, unter Windows über den
-systemweiten `Run`-Eintrag. Die Nutzereinrichtung wird immer vor der
-Registrierung ausgeführt. Ein unter Linux vorhandenes Profil wird dabei lokal
-wiederhergestellt, andernfalls fragt die Nutzereinrichtung bei der Anmeldung die
-Zugangsdaten ab.
+systemweiten `Run`-Eintrag. Die Registrierung ermittelt zuerst, ob es sich um
+einen Musterclient handelt. Nur auf normalen Clients wird danach die
+Nutzereinrichtung ausgeführt. Ein unter Linux vorhandenes Profil wird dabei
+lokal wiederhergestellt, andernfalls fragt die Nutzereinrichtung bei der
+Anmeldung die Zugangsdaten ab.
 `--no-userclient` installiert ausdrücklich nur den Systemdienst.
 
 Der System-Marker enthält keine Zugangsdaten. Er ist eine zufällige Kennung,

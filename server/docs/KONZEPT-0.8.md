@@ -28,11 +28,10 @@ Folgende Präzisierungen vermeiden logische und sicherheitsrelevante Fehler:
   Geräteidentität. Ein abweichender Hostname verwirft die kopierte Identität und
   löst auf dem Klon Enrollment aus.
 * `reset` fragt vor dem Löschen der Identität den Server nach dem Enrollment-Token
-  des zugeordneten Musterclients. Der Server kennt diese Zuordnung und liefert
-  exakt den Token, mit dem auch der Musterclient registriert wurde. Musterclients
-  selbst werden nicht auf diesem Weg zurückgesetzt. Ist der Server nicht
-  erreichbar, muss der Reset abbrechen, statt einen nicht mehr registrierbaren
-  Client zu erzeugen.
+  des lokal gespeicherten Musterclient-Hostnamens. Dieser Hostname stammt aus der
+  Token-Datei und bleibt im Gerätezustand erhalten. Musterclients selbst werden
+  nicht auf diesem Weg zurückgesetzt. Ist der Server nicht erreichbar, muss der
+  Reset abbrechen, statt einen nicht mehr registrierbaren Client zu erzeugen.
 
 ## Betriebsmodi
 

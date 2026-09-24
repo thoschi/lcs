@@ -342,7 +342,7 @@ def claim_enrollment_token(hostname, password):
       settings = json.loads(row['settings_json'] or '{}')
    except (json.JSONDecodeError, TypeError):
       settings = {}
-   return 200, {'enrollment_token': token, 'settings': settings}
+   return 200, {'enrollment_token': token, 'template_hostname': row['hostname'], 'settings': settings}
 
 
 def check_enrollment_token(supplied_hash, hostname=''):
@@ -357,28 +357,42 @@ def check_enrollment_token(supplied_hash, hostname=''):
    return 200, {'valid': bool(token), 'template_available': bool(template)}
 
 
-def create_reenrollment_token(device_id):
+def create_reenrollment_token(device_id, template_hostname=''):
    with db() as conn:
-      token = conn.execute('''
-         SELECT et.token_value FROM devices d
-         JOIN enrollment_tokens et ON et.template_device_id=d.template_device_id
-         WHERE d.id=? AND d.is_image_source=0 AND d.template_device_id<>''
-            AND et.enabled=1 AND et.token_type='template'
-      ''', (device_id,)).fetchone()
+      if template_hostname:
+         token = conn.execute('''
+            SELECT token_value, hostname FROM enrollment_tokens
+            WHERE lower(hostname)=lower(?) AND enabled=1 AND token_type='template'
+         ''', (template_hostname,)).fetchone()
+      else:
+         token = conn.execute('''
+            SELECT et.token_value, et.hostname FROM devices d
+            JOIN enrollment_tokens et ON et.template_device_id=d.template_device_id
+            WHERE d.id=? AND d.is_image_source=0 AND d.template_device_id<>''
+               AND et.enabled=1 AND et.token_type='template'
+         ''', (device_id,)).fetchone()
    if not token or not token['token_value']:
       raise ValueError('no active enrollment token from the device template: ' + device_id)
    return token['token_value']
 
 
-def reset_token(device_id, token):
+def reset_token(device_id, token, template_hostname=''):
    device = authenticate_device(device_id, token)
    if not device:
       return 401, {'error': 'unauthorized'}
    try:
-      value = create_reenrollment_token(device['id'])
+      value = create_reenrollment_token(device['id'], template_hostname)
    except ValueError as exc:
       return 409, {'error': str(exc)}
-   return 200, {'enrollment_token': value}
+   if not template_hostname:
+      with db() as conn:
+         row = conn.execute('''
+            SELECT et.hostname FROM devices d
+            JOIN enrollment_tokens et ON et.template_device_id=d.template_device_id
+            WHERE d.id=? AND et.token_type='template'
+         ''', (device['id'],)).fetchone()
+      template_hostname = row['hostname'] if row else ''
+   return 200, {'enrollment_token': value, 'template_hostname': template_hostname}
 
 
 def enroll(payload):
@@ -462,7 +476,8 @@ def enroll(payload):
          pass
    return 200, {'device_id': device_id, 'device_token': device_token,
                 'image_source': image_source, 'settings': settings,
-                'hostname': registered_hostname}
+                'hostname': registered_hostname,
+                'template_hostname': reusable['hostname'] if reusable['token_type'] == 'template' else ''}
 
 
 def _apply_enrollment_group(conn, device_id, group_name, now):
