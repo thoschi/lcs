@@ -22,9 +22,13 @@ def main():
    while True:
       try:
          status = request(config, 'status')
-         break
+         # Beim Windows-Login kann der Helfer den Dienst erreichen, bevor dieser
+         # die geklonte Geräteidentität geprüft und neu registriert hat.
+         if status.get('runtime_ready', True):
+            break
       except Exception:
-         time.sleep(2)
+         pass
+      time.sleep(2)
    if not status.get('client_enabled') or not status.get('initialization_required'):
       return 0
    # Linux can restore a saved shadow record without asking the user anything.
