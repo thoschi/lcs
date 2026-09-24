@@ -88,13 +88,9 @@ Get-CimInstance Win32_Process | Where-Object CommandLine -Like '*user_service.py
 # Nur ausführen, falls kein Prozess angezeigt wird:
 & "$env:ProgramFiles\LCS\Client\venv\Scripts\python.exe" `
    "$env:ProgramFiles\LCS\Client\user_service.py"
-# Das ausführliche DEBUG-Protokoll live verfolgen:
-Get-Content "$env:LOCALAPPDATA\LCS\user_service.log" -Wait
 ```
-Unter Linux liegt dasselbe Protokoll standardmäßig unter
-`~/.local/state/LCS/user_service.log`. Mit der Umgebungsvariable
-`LCS_USER_SERVICE_LOG` kann der Pfad auf beiden Plattformen überschrieben
-werden. Die Logdatei rotiert bei 5 MiB; drei ältere Dateien bleiben erhalten.
+Beim manuellen Start erscheint das ausführliche DEBUG-Protokoll direkt in der
+Konsole. Es wird keine separate Logdatei angelegt.
 Beim Upgrade eines bereits aus Musterclient-Daten erzeugten Testclients wird
 kein eigener Muster-Token für dessen Hostnamen verlangt. Seine kopierte
 Identität bleibt erhalten, bis der Systemdienst den abweichenden Hostnamen
