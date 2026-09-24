@@ -17,10 +17,21 @@ LOGGER = logging.getLogger('lcs.userservice')
 
 
 def configure_logging():
+   stream = sys.stdout
+   if stream is None and os.name == 'nt':
+      import ctypes
+
+      ctypes.windll.kernel32.AttachConsole(-1)
+      try:
+         stream = open('CONOUT$', 'w', encoding='utf-8', buffering=1)
+      except OSError:
+         pass
+   if stream is None:
+      return
    logging.basicConfig(
       level=logging.DEBUG,
       format='%(asctime)s %(levelname)s pid=%(process)d thread=%(threadName)s %(message)s',
-      stream=sys.stdout,
+      stream=stream,
       force=True,
    )
 
