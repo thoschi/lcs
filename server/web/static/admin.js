@@ -40,7 +40,7 @@
    let storedView = {};
    try { storedView = JSON.parse(sessionStorage.getItem(viewStorageKey) || '{}'); } catch (_) { /* Ungültige Altwerte ignorieren. */ }
    if (!storedView || typeof storedView !== 'object') storedView = {};
-   const filters = {entryType: '', status: '', platform: '', ...(storedView.filters || {})};
+   const filters = {entryType: '', status: '', platform: '', version: '', ...(storedView.filters || {})};
    if (search && typeof storedView.search === 'string') search.value = storedView.search;
    const count = document.querySelector('#client-result-count');
    let sortKey = 'hostname';
@@ -56,6 +56,7 @@
       rows().forEach(row => {
          const show = terms.every(term => row.dataset.search.includes(term)) &&
             (!filters.platform || row.dataset.platform.toLocaleLowerCase('de-DE').split(' ').includes(filters.platform.toLocaleLowerCase('de-DE'))) &&
+            (!filters.version || row.dataset.version === filters.version) &&
             (!filters.status || row.dataset.status === filters.status) &&
             (!filters.entryType || row.dataset.entryType === filters.entryType);
          row.hidden = !show;
@@ -315,6 +316,7 @@
                }));
                if (!device.platforms.length) platformCell.textContent = '–';
                Object.assign(row.dataset, {status: device.online ? '1' : '0', hostname: device.hostname.toLowerCase(), platform: device.platform_filter,
+                  version: device.agent_version === table.dataset.currentVersion ? 'current' : 'other',
                   agent: device.agent_version.toLowerCase(), last_seen: String(device.last_seen), search: JSON.stringify(device).toLowerCase()});
                row.dataset.capabilityStates = JSON.stringify(device.capability_states);
                row.dataset.capabilities = JSON.stringify(device.executable_capabilities);

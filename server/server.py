@@ -15,6 +15,7 @@ import core
 HOST = os.environ.get('LCS_SERVER_HOST', '127.0.0.1')
 PORT = int(os.environ.get('LCS_SERVER_PORT', '5000'))
 BASE = Path(__file__).resolve().parent
+CURRENT_CLIENT_VERSION = '0.7.0'
 MAX_REQUEST_BYTES = int(os.environ.get('LCS_MAX_REQUEST_BYTES', str(2 * 1024 * 1024)))
 ADMIN_USERS = {value.strip() for value in os.environ.get('LCS_ADMIN_USERS', '').split(',') if value.strip()}
 
@@ -238,7 +239,8 @@ def render_admin(new_token=None, editor=None, page='overview'):
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=manifest,
                           now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
-                          task_devices=task_devices, page=page, logs=logs, all_group=all_group)
+                          task_devices=task_devices, page=page, logs=logs, all_group=all_group,
+                          current_client_version=CURRENT_CLIENT_VERSION)
 
 
 @app.get('/health')
