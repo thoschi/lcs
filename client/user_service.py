@@ -17,11 +17,12 @@ LOGGER = logging.getLogger('lcs.userservice')
 
 
 def configure_logging():
-   LOGGER.setLevel(logging.DEBUG)
-   formatter = logging.Formatter('%(asctime)s %(levelname)s pid=%(process)d thread=%(threadName)s %(message)s')
-   stream = logging.StreamHandler(sys.stdout)
-   stream.setFormatter(formatter)
-   LOGGER.addHandler(stream)
+   logging.basicConfig(
+      level=logging.DEBUG,
+      format='%(asctime)s %(levelname)s pid=%(process)d thread=%(threadName)s %(message)s',
+      stream=sys.stdout,
+      force=True,
+   )
 
 
 def config_path():
