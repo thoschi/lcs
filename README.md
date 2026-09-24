@@ -13,7 +13,9 @@ erstellen, verteilen oder nachladen.
 * **`lcs-userservice`** startet bei der Benutzeranmeldung ausschließlich für die
   einmalige Abfrage von Schulnetz-Login und -Passwort. Unter Linux stellt er eine
   bereits gespeicherte Shadow-Zeile ohne Dialog wieder her. Nach erfolgreicher
-  Einrichtung wird Autologin deaktiviert und die Sitzung beendet.
+  Einrichtung eines lokalen Kontos wird Autologin deaktiviert und die Sitzung
+  beendet. Bei Domänenanmeldung wird dagegen nur der benutzerspezifische
+  LCS-Speicher eingerichtet und einmalig das Schulnetz-Passwort abgefragt.
 * **LCS Benutzeraktionen** ist ein separat aufrufbares Menü. Es zeigt genau die
   vom lokalen Systemdienst als benutzerausführbar gemeldeten Fähigkeiten.
 * **`lcs-server`** registriert Geräte, zeigt deren Basisinformationen und die vom
@@ -60,6 +62,12 @@ die nach erfolgreicher Einrichtung sowohl im Systemzustand als auch neben dem
 Benutzerprofil gespeichert wird. Stimmen beide Kennungen überein, ist dieses
 Profil bereits auf genau diesem Client eingerichtet; fehlt eine davon oder
 weicht sie ab, wird die Einrichtung erneut ausgeführt.
+
+Ist „Angemeldeten Domänenbenutzer übernehmen“ aktiviert, gilt die Einrichtung
+für jeden Domänenbenutzer getrennt. Sein Benutzername ist bereits bekannt; der
+Dialog fragt daher nur das Schulnetz-Passwort ab. LCS legt den konfigurierten
+Benutzerdatenpfad an, speichert das Passwort aber nicht. Lokales Passwort,
+Shadow-Zeile und Autologin-Konfiguration bleiben in diesem Modus unverändert.
 
 Server, Systemdienst und Benutzerprogramme werden mit `install server`,
 `install service` beziehungsweise `install client` einzeln installiert. Ein
