@@ -18,7 +18,7 @@ from common.config import env_bool, load_env
 from common.http_client import request_json
 from common.platform_info import hostname, logged_in_users, system_information
 
-VERSION = '0.7.0'
+VERSION = '0.7.1'
 
 
 def log(message, **fields):
@@ -206,7 +206,8 @@ def handle_user_request(config, runtime, request, peer_username=''):
       information = system_information(VERSION)
       information['capabilities'] = public_capabilities()
       return {'ok': True, 'client_enabled': runtime.get('client_enabled', False),
-              'image_source': runtime.get('image_source', False), 'system': information, **status}
+              'image_source': runtime.get('image_source', False),
+              'runtime_ready': runtime.get('ready', True), 'system': information, **status}
    if operation == 'capabilities':
       return {'ok': True, 'capabilities': user_capabilities(runtime['stack'])}
    if operation == 'execute':
@@ -686,7 +687,7 @@ def run_forever(env_path=None, stop_requested=None):
    stack = {'generation': 0, 'capabilities': public_capabilities()}
    user_runtime = {'stack': stack,
                    'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
-                   'image_source': bool(state.get('image_source'))}
+                   'image_source': bool(state.get('image_source')), 'ready': False}
    threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
    last_poll = 0
@@ -719,6 +720,8 @@ def run_forever(env_path=None, stop_requested=None):
             time.sleep(3)
             continue
 
+      user_runtime['ready'] = True
+
       if state.get('image_source'):
          if now - last_heartbeat >= heartbeat_interval:
             try:
@@ -726,6 +729,7 @@ def run_forever(env_path=None, stop_requested=None):
                if status == 401:
                   state = {}
                   user_runtime['client_enabled'] = False
+                  user_runtime['ready'] = False
                   last_heartbeat = now
                   continue
                if status != 200:
@@ -749,6 +753,7 @@ def run_forever(env_path=None, stop_requested=None):
             if code == 401:
                state = {}
                user_runtime['client_enabled'] = False
+               user_runtime['ready'] = False
                last_poll = now
                continue
          except Exception as exc:
@@ -761,6 +766,7 @@ def run_forever(env_path=None, stop_requested=None):
             if status == 401:
                state = {}
                user_runtime['client_enabled'] = False
+               user_runtime['ready'] = False
                last_heartbeat = now
                continue
             if status != 200:

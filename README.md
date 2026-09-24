@@ -1,4 +1,4 @@
-# LCS v0.7
+# LCS v0.7.1
 
 LCS verwaltet Windows- und Linux-Arbeitsplätze mit einem bewusst kleinen,
 lokal funktionsfähigen Client. Der Systemdienst enthält seine Fähigkeiten fest
@@ -54,6 +54,12 @@ gesperrt. Erst nach der Registrierung eines daraus erzeugten Clients wird sie
 freigegeben; ein unter Linux vorhandenes Profil wird sofort wiederhergestellt,
 andernfalls fragt die Nutzereinrichtung bei der Anmeldung die Zugangsdaten ab.
 `--no-userclient` installiert ausdrücklich nur den Systemdienst.
+
+Der System-Marker enthält keine Zugangsdaten. Er ist eine zufällige Kennung,
+die nach erfolgreicher Einrichtung sowohl im Systemzustand als auch neben dem
+Benutzerprofil gespeichert wird. Stimmen beide Kennungen überein, ist dieses
+Profil bereits auf genau diesem Client eingerichtet; fehlt eine davon oder
+weicht sie ab, wird die Einrichtung erneut ausgeführt.
 
 Server, Systemdienst und Benutzerprogramme werden mit `install server`,
 `install service` beziehungsweise `install client` einzeln installiert. Ein
