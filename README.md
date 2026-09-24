@@ -43,18 +43,18 @@ Windows (administrative PowerShell):
 .\install.ps1 install workstation https://lcs.example
 ```
 
-Bei der ersten Musterclient-Registrierung liefert der Enrollment-Token unter
-anderem `LCS_USER_DATA`. `$username` oder `${username}` wird zur Laufzeit durch
-den lokalen Sitzungsbenutzer ersetzt. Standardmäßig sind dies unter Linux
+`LCS_USER_DATA` kann in der lokalen Client-Konfiguration gesetzt werden.
+`$username` oder `${username}` wird zur Laufzeit durch den lokalen
+Sitzungsbenutzer ersetzt. Standardmäßig sind dies unter Linux
 `/home/<benutzer>/.config/lcs` und unter Windows das LCS-Verzeichnis in AppData.
 
 `workstation` installiert auf beiden Plattformen den privilegierten
 Systemdienst und die Nutzereinrichtung für jede lokale Anmeldung. Unter Linux
 erfolgt deren Start über den systemweiten XDG-Autostart, unter Windows über den
-systemweiten `Run`-Eintrag. Auf dem Musterclient bleibt die Nutzereinrichtung
-gesperrt. Erst nach der Registrierung eines daraus erzeugten Clients wird sie
-freigegeben; ein unter Linux vorhandenes Profil wird sofort wiederhergestellt,
-andernfalls fragt die Nutzereinrichtung bei der Anmeldung die Zugangsdaten ab.
+systemweiten `Run`-Eintrag. Die Nutzereinrichtung wird immer vor der
+Registrierung ausgeführt. Ein unter Linux vorhandenes Profil wird dabei lokal
+wiederhergestellt, andernfalls fragt die Nutzereinrichtung bei der Anmeldung die
+Zugangsdaten ab.
 `--no-userclient` installiert ausdrücklich nur den Systemdienst.
 
 Der System-Marker enthält keine Zugangsdaten. Er ist eine zufällige Kennung,
@@ -79,15 +79,13 @@ Interaktion aktiv. Nach Installation oder Upgrade ist eine neue Anmeldung
 erforderlich.
 
 Der privilegierte Systemdienst prüft Profil und System-Marker und führt alle
-Änderungen am lokalen Konto aus. Der Nutzerdienst fragt den Status lediglich ab,
-weil nur ein Prozess in der angemeldeten Sitzung den Passwortdialog anzeigen
-kann. Während ein Musterclient geklont und neu registriert wird, sind diese
-Abfragen erwartbar; die DEBUG-Ausgabe nennt, ob Registrierung, Freigabe oder eine
-bereits abgeschlossene Einrichtung der Grund für das Warten ist. Die eigentliche
-Prüfung wird mit Pfaden und Ergebnis in `C:\ProgramData\LCS\service.log`
-protokolliert. Anders als Linux kann Windows keinen kopierten Passwort-Hash aus
-dem Profil zurückspielen, weshalb dort bei einer erforderlichen Einrichtung der
-Dialog benötigt wird.
+Änderungen am lokalen Konto aus. Diese lokale Einrichtung wird immer vor der
+Registrierung abgeschlossen und benötigt keine Serververbindung. Fehlt das
+Profil, fragt der Nutzerdienst Schulnetz-Login und Passwort ab. Ist auf einem
+Autologin-Rechner bereits ein Profil vorhanden, stellt Linux dessen Shadow-Zeile
+wieder her; Windows fragt das Passwort erneut ab. Anschließend werden Autologin
+deaktiviert und die Sitzung beendet. Stimmen Profil- und System-Marker bereits
+überein, fährt der Dienst ohne Benutzerinteraktion mit der Registrierung fort.
 
 Zum Prüfen und zum manuellen Testen in der angemeldeten Benutzersitzung:
 
@@ -100,8 +98,6 @@ Get-CimInstance Win32_Process | Where-Object CommandLine -Like '*user_service.py
 & "$env:ProgramFiles\LCS\Client\venv\Scripts\python.exe" `
    "$env:ProgramFiles\LCS\Client\user_service.py"
 ```
-Beim manuellen Start erscheint das ausführliche DEBUG-Protokoll direkt in der
-Konsole. Es wird keine separate Logdatei angelegt.
 Beim Upgrade eines bereits aus Musterclient-Daten erzeugten Testclients wird
 kein eigener Muster-Token für dessen Hostnamen verlangt. Seine kopierte
 Identität bleibt erhalten, bis der Systemdienst den abweichenden Hostnamen
