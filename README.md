@@ -72,3 +72,7 @@ Shadow-Zeile und Autologin-Konfiguration bleiben in diesem Modus unverändert.
 Server, Systemdienst und Benutzerprogramme werden mit `install server`,
 `install service` beziehungsweise `install client` einzeln installiert. Ein
 Upgrade erfolgt entsprechend mit `upgrade` statt `install`.
+Beim Upgrade eines bereits aus Musterclient-Daten erzeugten Testclients wird
+kein eigener Muster-Token für dessen Hostnamen verlangt. Seine kopierte
+Identität bleibt erhalten, bis der Systemdienst den abweichenden Hostnamen
+erkennt und das Gerät als normalen Client neu registriert.

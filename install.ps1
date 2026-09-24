@@ -223,6 +223,13 @@ function Request-EnrollmentToken {
    Set-ServerSettings $response.settings
 }
 
+function Test-TemplateTokenAvailable {
+   $json = @{ hostname = $env:COMPUTERNAME } | ConvertTo-Json
+   $body = [Text.Encoding]::UTF8.GetBytes($json)
+   $response = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/check') -ContentType 'application/json; charset=utf-8' -Body $body
+   return [bool]$response.template_available
+}
+
 function Ensure-EnrollmentToken {
    $deviceState = Join-Path $StateRoot 'device.json'
    if (Test-Path $deviceState) {
@@ -241,6 +248,10 @@ function Ensure-EnrollmentToken {
       $body = @{ token_hash = $tokenHash } | ConvertTo-Json
       $result = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/check') -ContentType 'application/json' -Body $body
       if ($result.valid) { return }
+      if (($Operation -eq 'upgrade') -and -not (Test-TemplateTokenAvailable)) {
+         Write-Host "Kein Muster-Token für $env:COMPUTERNAME vorhanden; gespeicherter Token bleibt unverändert."
+         return
+      }
       Write-Host 'Gespeicherter Imaging-Token ist nicht mehr gültig und wird ersetzt.'
       Request-EnrollmentToken
       return
@@ -252,6 +263,10 @@ function Ensure-EnrollmentToken {
       return
    }
    if ($ServerUrl) {
+      if (($Operation -eq 'upgrade') -and -not (Test-TemplateTokenAvailable)) {
+         Write-Host "Kein Muster-Token für $env:COMPUTERNAME vorhanden; Upgrade wird ohne Token-Abfrage fortgesetzt."
+         return
+      }
       Request-EnrollmentToken
       return
    }
