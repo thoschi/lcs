@@ -345,8 +345,8 @@ function Install-UserClient {
    $userService = Join-Path $ClientRoot 'user_service.py'
    $runCommand = '"{0}" "{1}"' -f $pythonw, $userService
    New-ItemProperty -Path $runPath -Name 'LCS User Service' -Value $runCommand -PropertyType String -Force | Out-Null
-   Start-Process -FilePath $pythonw -ArgumentList ('"{0}"' -f $userService) -WorkingDirectory $ClientRoot
    Write-Host "LCS-User-Client installiert: $ClientRoot"
+   Write-Host 'Die Nutzereinrichtung startet bei der nächsten Benutzeranmeldung.'
 }
 
 function Remove-UserClientIntegration {

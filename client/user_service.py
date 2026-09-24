@@ -17,8 +17,7 @@ def config_path():
    return Path(os.environ.get('LCS_CONFIG', default))
 
 
-def main():
-   config = load_env(config_path())
+def run_once(config):
    while True:
       try:
          status = request(config, 'status')
@@ -78,6 +77,14 @@ def main():
    root.protocol('WM_DELETE_WINDOW', root.iconify)
    root.mainloop()
    return 0
+
+
+def main():
+   config = load_env(config_path())
+   if os.name != 'nt':
+      return run_once(config)
+   while True:
+      run_once(config)
 
 
 if __name__ == '__main__':
