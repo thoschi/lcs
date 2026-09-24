@@ -293,6 +293,9 @@
          if (!response.ok) throw new Error(`HTTP ${response.status}`);
          const data = await response.json();
          if (table) {
+            table.dataset.currentVersion = data.current_client_version;
+            const currentVersionButton = document.querySelector('[data-filter="version"] [data-value="current"]');
+            if (currentVersionButton) currentVersionButton.textContent = `Aktuell (${data.current_client_version || '–'})`;
             const currentIds = clientRows().map(row => row.dataset.clientId).sort().join(',');
             const newIds = data.devices.map(device => device.id).sort().join(',');
             if (currentIds !== newIds || data.devices.some(device => {

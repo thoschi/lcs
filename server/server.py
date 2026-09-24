@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import time
 import io
@@ -15,7 +16,6 @@ import core
 HOST = os.environ.get('LCS_SERVER_HOST', '127.0.0.1')
 PORT = int(os.environ.get('LCS_SERVER_PORT', '5000'))
 BASE = Path(__file__).resolve().parent
-CURRENT_CLIENT_VERSION = '0.7.5'
 MAX_REQUEST_BYTES = int(os.environ.get('LCS_MAX_REQUEST_BYTES', str(2 * 1024 * 1024)))
 ADMIN_USERS = {value.strip() for value in os.environ.get('LCS_ADMIN_USERS', '').split(',') if value.strip()}
 
@@ -89,6 +89,12 @@ def admin_required(func):
 def check_csrf():
    if not secrets.compare_digest(session.get('csrf', ''), request.form.get('csrf', '')):
       abort(400, 'Ungültiges Formular-Token')
+
+
+def current_client_version(devices):
+   versions = {device['agent_version'] for device in devices if device.get('agent_version')}
+   return max(versions, key=lambda version: (
+      tuple(int(part) for part in re.findall(r'\d+', version)), version), default='')
 
 
 def dashboard_data():
@@ -192,6 +198,7 @@ def audit_data():
 
 def render_admin(new_token=None, editor=None, page='overview'):
    devices, groups, assignments, tokens, actions, template_tree = dashboard_data()
+   client_version = current_client_version(devices)
    task_devices = []
    for item in (device for device in devices if not device['is_image_source']):
       existing = next((device for device in task_devices
@@ -240,7 +247,8 @@ def render_admin(new_token=None, editor=None, page='overview'):
                           tokens=tokens, actions=actions, manifest=manifest,
                           now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
                           task_devices=task_devices, page=page, logs=logs, all_group=all_group,
-                          current_client_version=CURRENT_CLIENT_VERSION)
+                          current_client_version=client_version,
+                          admin_js_version=int((BASE / 'web/static/admin.js').stat().st_mtime))
 
 
 @app.get('/health')
@@ -345,6 +353,7 @@ def admin_logging():
 @admin_required
 def client_status():
    devices, _, _, _, actions, _ = dashboard_data()
+   client_version = current_client_version(devices)
    for device in devices:
       reported = device.get('hardware', {}).get('capabilities', [])
       device['capability_states'] = [
@@ -352,7 +361,7 @@ def client_status():
          for item in reported
       ]
       device['executable_capabilities'] = [dict(item) for item in reported]
-   return jsonify(devices=[{
+   return jsonify(current_client_version=client_version, devices=[{
       'id': item['id'],
       'online': item['online'],
       'last_seen': item['last_seen'],
