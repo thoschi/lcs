@@ -56,7 +56,14 @@ def run_once(config):
                and status.get('initialization_required')):
             LOGGER.info('Einrichtungsanforderung erkannt')
             break
-         LOGGER.debug('Noch keine Einrichtung erforderlich; nächste Abfrage in 2 Sekunden')
+         if not status.get('runtime_ready', True):
+            reason = 'Systemdienst registriert den Rechner noch'
+         elif not status.get('client_enabled'):
+            reason = ('Nutzereinrichtung ist auf dem Musterclient gesperrt' if status.get('image_source')
+                      else 'Nutzerclient ist noch nicht freigegeben')
+         else:
+            reason = 'Benutzerprofil ist auf diesem Rechner bereits eingerichtet'
+         LOGGER.debug('%s; nächste Abfrage in 2 Sekunden', reason)
       except Exception:
          LOGGER.exception('Statusabfrage %d fehlgeschlagen; neuer Versuch in 2 Sekunden', attempt)
       time.sleep(2)

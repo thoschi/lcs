@@ -99,6 +99,19 @@ def initialization_status(config, local_username=''):
            'initialization_required': required, 'password_required': required and os.name == 'nt'}
 
 
+def refresh_initialization_status(config, runtime):
+   """Keep the local-account decision in the privileged service."""
+   if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+      return
+   status = initialization_status(config)
+   previous = runtime.get('initialization_status')
+   runtime['initialization_status'] = status
+   if status != previous:
+      log('Status der Benutzereinrichtung ermittelt',
+          profile_path=str(user_profile_path(config)),
+          marker_path=str(user_marker_path(config)), **status)
+
+
 def shadow_entry(username):
    for line in Path('/etc/shadow').read_text(encoding='utf-8').splitlines():
       fields = line.split(':')
@@ -212,7 +225,10 @@ def handle_user_request(config, runtime, request, peer_username=''):
    operation = request.get('operation')
    domain_username = peer_username or str(request.get('local_username', '')).strip()
    if operation == 'status':
-      status = initialization_status(config, domain_username)
+      if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+         status = initialization_status(config, domain_username)
+      else:
+         status = runtime.get('initialization_status') or initialization_status(config)
       if status.get('domain_username'):
          status['username'] = domain_username
       information = system_information(VERSION)
@@ -235,8 +251,11 @@ def handle_user_request(config, runtime, request, peer_username=''):
    if not runtime.get('client_enabled', False):
       return {'ok': False, 'error': 'Der Nutzerclient ist für einen Musterclient deaktiviert.'}
    if operation == 'initialize':
-      return initialize_user(config, str(request.get('username', '')).strip(),
-                             str(request.get('password', '')), client_username=domain_username)
+      profile_username = domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else ''
+      result = initialize_user(config, str(request.get('username', '')).strip(),
+                               str(request.get('password', '')), client_username=profile_username)
+      refresh_initialization_status(config, runtime)
+      return result
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
 
 
@@ -698,12 +717,14 @@ def run_forever(env_path=None, stop_requested=None):
    user_runtime = {'stack': stack,
                    'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
                    'image_source': bool(state.get('image_source')), 'ready': False}
+   refresh_initialization_status(config, user_runtime)
    threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
    last_poll = 0
    inventory = {}
 
    while True:
+      refresh_initialization_status(config, user_runtime)
       now = time.time()
       if stop_requested and stop_requested():
          log('Dienststopp angefordert')

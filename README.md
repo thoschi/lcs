@@ -78,6 +78,17 @@ auf Anforderungen des Systemdienstes und bleibt auch nach einer abgeschlossenen
 Interaktion aktiv. Nach Installation oder Upgrade ist eine neue Anmeldung
 erforderlich.
 
+Der privilegierte Systemdienst prüft Profil und System-Marker und führt alle
+Änderungen am lokalen Konto aus. Der Nutzerdienst fragt den Status lediglich ab,
+weil nur ein Prozess in der angemeldeten Sitzung den Passwortdialog anzeigen
+kann. Während ein Musterclient geklont und neu registriert wird, sind diese
+Abfragen erwartbar; die DEBUG-Ausgabe nennt, ob Registrierung, Freigabe oder eine
+bereits abgeschlossene Einrichtung der Grund für das Warten ist. Die eigentliche
+Prüfung wird mit Pfaden und Ergebnis in `C:\ProgramData\LCS\service.log`
+protokolliert. Anders als Linux kann Windows keinen kopierten Passwort-Hash aus
+dem Profil zurückspielen, weshalb dort bei einer erforderlichen Einrichtung der
+Dialog benötigt wird.
+
 Zum Prüfen und zum manuellen Testen in der angemeldeten Benutzersitzung:
 
 ```powershell
