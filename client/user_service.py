@@ -4,7 +4,6 @@ import os
 import sys
 import time
 import tkinter as tk
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from tkinter import messagebox
 
@@ -17,32 +16,12 @@ from common.service_client import request
 LOGGER = logging.getLogger('lcs.userservice')
 
 
-def log_path():
-   configured = os.environ.get('LCS_USER_SERVICE_LOG')
-   if configured:
-      return Path(configured).expanduser()
-   if os.name == 'nt':
-      root = Path(os.environ.get('LOCALAPPDATA', Path.home() / 'AppData' / 'Local'))
-   else:
-      root = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state'))
-   return root / 'LCS' / 'user_service.log'
-
-
 def configure_logging():
    LOGGER.setLevel(logging.DEBUG)
    formatter = logging.Formatter('%(asctime)s %(levelname)s pid=%(process)d thread=%(threadName)s %(message)s')
-   stream = logging.StreamHandler()
+   stream = logging.StreamHandler(sys.stdout)
    stream.setFormatter(formatter)
    LOGGER.addHandler(stream)
-   path = log_path()
-   try:
-      path.parent.mkdir(parents=True, exist_ok=True)
-      output = RotatingFileHandler(path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8')
-      output.setFormatter(formatter)
-      LOGGER.addHandler(output)
-   except Exception:
-      LOGGER.exception('Logdatei konnte nicht geöffnet werden: %s', path)
-   return path
 
 
 def config_path():
@@ -140,9 +119,9 @@ def run_once(config):
 
 def main():
    path = config_path()
-   output = configure_logging()
-   LOGGER.info('LCS-Nutzerdienst gestartet; Plattform=%s, Python=%s, Konfiguration=%s, Logdatei=%s',
-               sys.platform, sys.version.replace('\n', ' '), path, output)
+   configure_logging()
+   LOGGER.info('LCS-Nutzerdienst gestartet; Plattform=%s, Python=%s, Konfiguration=%s',
+               sys.platform, sys.version.replace('\n', ' '), path)
    config = load_env(path)
    LOGGER.debug('Konfiguration geladen; Schlüssel=%s, Socket=%s', sorted(config),
                 config.get('LCS_USER_SOCKET', r'\\.\pipe\lcs-user' if os.name == 'nt' else '/run/lcs/user.sock'))

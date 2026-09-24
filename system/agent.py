@@ -18,7 +18,7 @@ from common.config import env_bool, load_env
 from common.http_client import request_json
 from common.platform_info import hostname, logged_in_users, system_information
 
-VERSION = '0.7.4'
+VERSION = '0.7.5'
 
 
 def log(message, **fields):
