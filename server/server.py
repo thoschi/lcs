@@ -15,7 +15,7 @@ import core
 HOST = os.environ.get('LCS_SERVER_HOST', '127.0.0.1')
 PORT = int(os.environ.get('LCS_SERVER_PORT', '5000'))
 BASE = Path(__file__).resolve().parent
-CURRENT_CLIENT_VERSION = '0.7.2'
+CURRENT_CLIENT_VERSION = '0.7.3'
 MAX_REQUEST_BYTES = int(os.environ.get('LCS_MAX_REQUEST_BYTES', str(2 * 1024 * 1024)))
 ADMIN_USERS = {value.strip() for value in os.environ.get('LCS_ADMIN_USERS', '').split(',') if value.strip()}
 

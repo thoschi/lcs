@@ -72,9 +72,23 @@ Shadow-Zeile und Autologin-Konfiguration bleiben in diesem Modus unverändert.
 Server, Systemdienst und Benutzerprogramme werden mit `install server`,
 `install service` beziehungsweise `install client` einzeln installiert. Ein
 Upgrade erfolgt entsprechend mit `upgrade` statt `install`.
-Unter Windows startet die Installation beziehungsweise das Upgrade die
-Nutzereinrichtung auch in der laufenden Sitzung neu. Danach wartet sie auf die
-Freigabe durch den Systemdienst; ein erneutes Anmelden ist nicht erforderlich.
+Unter Windows startet die Nutzereinrichtung über den systemweiten `Run`-Eintrag
+bei jeder Benutzeranmeldung im richtigen Benutzerkontext. Sie wartet dauerhaft
+auf Anforderungen des Systemdienstes und bleibt auch nach einer abgeschlossenen
+Interaktion aktiv. Nach Installation oder Upgrade ist eine neue Anmeldung
+erforderlich.
+
+Zum Prüfen und zum manuellen Testen in der angemeldeten Benutzersitzung:
+
+```powershell
+Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' `
+   -Name 'LCS User Service'
+Get-CimInstance Win32_Process | Where-Object CommandLine -Like '*user_service.py*' |
+   Select-Object ProcessId, SessionId, CommandLine
+# Nur ausführen, falls kein Prozess angezeigt wird:
+& "$env:ProgramFiles\LCS\Client\venv\Scripts\python.exe" `
+   "$env:ProgramFiles\LCS\Client\user_service.py"
+```
 Beim Upgrade eines bereits aus Musterclient-Daten erzeugten Testclients wird
 kein eigener Muster-Token für dessen Hostnamen verlangt. Seine kopierte
 Identität bleibt erhalten, bis der Systemdienst den abweichenden Hostnamen
