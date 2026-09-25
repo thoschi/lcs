@@ -116,8 +116,6 @@ deaktiviert und die Sitzung beendet. Stimmen Profil- und System-Marker bereits
 Windows und Linux verwenden gemeinsam `credentials.json`. LCS übernimmt daraus
 den Schulnetz-Login und zeigt ihn im Dialog ausgegraut an. Fehlt die lokale
 Passworteinrichtung, wird das Passwort erneut abgefragt und nicht gespeichert.
-Das gilt unter Linux auch auf einem als Musterclient erkannten System, wenn die
-Datei zwar den Benutzernamen, aber noch keine Linux-Shadow-Zeile enthält.
 
 Zum Prüfen und zum manuellen Testen in der angemeldeten Benutzersitzung:
 

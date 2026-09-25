@@ -229,10 +229,11 @@ def handle_user_request(config, runtime, request, peer_username=''):
          status = initialization_status(config, domain_username)
          runtime['initialization_status'] = status
       else:
-         status = runtime.get('initialization_status') or initialization_status(config)
+         status = initialization_status(config)
+         runtime['initialization_status'] = status
       # Eine ausstehende Geräteregistrierung darf die lokale Einrichtung nicht
-      # verstecken. Nur ein Musterclient ohne nötige Passworteingabe wird ausgenommen.
-      if runtime.get('image_source') and not status.get('password_required'):
+      # verstecken. Nur ein sicher erkannter Musterclient wird ausgenommen.
+      if runtime.get('image_source'):
          status = dict(status)
          status['initialization_required'] = False
       if status.get('domain_username'):
