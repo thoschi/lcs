@@ -61,14 +61,17 @@ bleiben erhalten. Die Server-URL muss beim Upgrade von Systemdienst,
 User-Client oder Workstation nicht erneut angegeben werden, da der Installer
 sie aus der vorhandenen `client.env` liest. Eine erneute `install` entfernt
 dagegen vorhandene Reste der jeweiligen Komponente. `reset-identity` fordert zuerst authentifiziert genau den
-Enrollment-Token des lokal gespeicherten Musterclient-Hostnamens an und bricht
+Enrollment-Token der lokal gespeicherten Prüfsumme an und bricht
 bei Nichterreichbarkeit sicher ab. Heruntergeladene Token-Dateien enthalten
 dafür in der zweiten Zeile den Hostnamen; ältere einzeilige Dateien bleiben
 lesbar.
 
 `LCS_USER_DATA` kann in der lokalen Client-Konfiguration gesetzt werden.
-Der mit dem Token übergebene Pfad wird unter Windows und Linux unverändert
-verwendet. Enthält er ausdrücklich `$username` oder `${username}`, wird nur
+Bei der Erstinstallation wählt eine sechsstellige Prüfsumme den Muster-Token
+eindeutig aus. Dessen Einstellungen werden einmalig in die lokale Konfiguration
+des Musterclients übernommen und danach nicht mehr serverseitig verändert.
+Der dabei übergebene Pfad wird unter Windows und Linux unverändert verwendet.
+Enthält er ausdrücklich `$username` oder `${username}`, wird nur
 diese Variable bei der Pfadermittlung durch den betreffenden Benutzernamen ersetzt.
 Ohne diese Angabe liegt das LCS-Verzeichnis standardmäßig unter Linux in
 `/home/<konfigurierter-benutzer>/.config/lcs` und unter Windows in dessen AppData.

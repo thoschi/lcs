@@ -194,7 +194,7 @@ function Clear-Runtime([string]$Root, [string[]]$Keep) {
 }
 
 function Set-ServerSettings($Settings) {
-   $allowed = @('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME')
+   $allowed = @('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME', 'LCS_TOKEN_CHECKSUM')
    $lines = if (Test-Path $ClientEnv) { @(Get-Content -LiteralPath $ClientEnv) } else { @() }
    $lines = @($lines | Where-Object {
       $line = $_
@@ -216,9 +216,11 @@ function Copy-Tree([string]$Source, [string]$Target) {
 }
 
 function Request-EnrollmentToken {
+   $checksum = Read-Host 'Sechsstellige Prüfsumme'
+   if ($checksum -notmatch '^\d{6}$') { throw 'Die Prüfsumme muss genau sechsstellig sein.' }
    $credential = Get-Credential -UserName $env:COMPUTERNAME -Message 'Passwort für den LCS-Image-Zugang'
    $password = $credential.GetNetworkCredential().Password
-   $json = @{ hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
+   $json = @{ checksum = $checksum; hostname = $env:COMPUTERNAME; password = $password } | ConvertTo-Json
    # Windows PowerShell kodiert String-Bodys sonst nicht zuverlässig als UTF-8.
    $body = [Text.Encoding]::UTF8.GetBytes($json)
    $response = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/claim') -ContentType 'application/json; charset=utf-8' -Body $body
@@ -228,7 +230,9 @@ function Request-EnrollmentToken {
 }
 
 function Test-TemplateTokenAvailable {
-   $json = @{ hostname = $env:COMPUTERNAME } | ConvertTo-Json
+   $checksum = Read-EnvValue $ClientEnv 'LCS_TOKEN_CHECKSUM'
+   if (-not $checksum) { return $false }
+   $json = @{ checksum = $checksum } | ConvertTo-Json
    $body = [Text.Encoding]::UTF8.GetBytes($json)
    $response = Invoke-RestMethod @ProxyParameters -Method Post -Uri ($ServerUrl.TrimEnd('/') + '/api/v1/token/check') -ContentType 'application/json; charset=utf-8' -Body $body
    return [bool]$response.template_available
@@ -284,6 +288,8 @@ function Write-ClientEnv {
    $userData = Read-EnvValue $ClientEnv 'LCS_USER_DATA'
    $requireLocalUsername = Read-EnvValue $ClientEnv 'LCS_USE_DOMAIN_USERNAME'
    $passwordUsername = Read-EnvValue $ClientEnv 'LCS_PASSWORD_USERNAME'
+   $templateHostname = Read-EnvValue $ClientEnv 'LCS_TEMPLATE_HOSTNAME'
+   $tokenChecksum = Read-EnvValue $ClientEnv 'LCS_TOKEN_CHECKSUM'
    $defaultPassword = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
    if (-not $passwordUsername) {
       $passwordUsername = Read-Host 'Lokaler Benutzer [nutzer]'
@@ -305,6 +311,8 @@ function Write-ClientEnv {
    if ($userData) { $lines += "LCS_USER_DATA=$userData" }
    if ($requireLocalUsername) { $lines += "LCS_USE_DOMAIN_USERNAME=$requireLocalUsername" }
    if ($passwordUsername) { $lines += "LCS_PASSWORD_USERNAME=$passwordUsername" }
+   if ($templateHostname) { $lines += "LCS_TEMPLATE_HOSTNAME=$templateHostname" }
+   if ($tokenChecksum) { $lines += "LCS_TOKEN_CHECKSUM=$tokenChecksum" }
    Write-Utf8 $ClientEnv (($lines -join "`r`n") + "`r`n")
 }
 
@@ -551,4 +559,9 @@ switch ($Mode.ToLowerInvariant()) {
    }
    'reset-identity' { Reset-Identity }
    default { Show-Usage; exit 2 }
+}
+
+if ($Operation -eq 'upgrade') {
+   $service = Get-Service LCSService -ErrorAction SilentlyContinue
+   if ($service -and $service.Status -eq 'Running') { Restart-Service LCSService }
 }

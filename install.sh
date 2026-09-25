@@ -161,7 +161,8 @@ import sys
 
 path, raw = sys.argv[1:]
 settings = json.loads(raw).get('settings', {})
-allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME')
+allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME',
+           'LCS_TEMPLATE_HOSTNAME', 'LCS_TOKEN_CHECKSUM')
 lines = open(path, encoding='utf-8').read().splitlines() if os.path.exists(path) else []
 lines = [line for line in lines if not any(line.startswith(key + '=') for key in allowed)]
 for key in allowed:
@@ -174,11 +175,13 @@ PY
 }
 
 download_enrollment_token() {
-   local password response token template_hostname
+   local checksum password response token template_hostname
+   read -r -p "Sechsstellige Prüfsumme: " checksum </dev/tty
+   [[ "$checksum" =~ ^[0-9]{6}$ ]] || { echo "Die Prüfsumme muss genau sechsstellig sein." >&2; exit 1; }
    read -r -s -p "Passwort für $(hostname): " password </dev/tty
    echo
    response="$(curl -fsS "${CURL_PROXY_ARGS[@]}" -H 'Content-Type: application/json' \
-      --data "$(python3 -c 'import json,sys; print(json.dumps({"hostname":sys.argv[1],"password":sys.argv[2]}))' "$(hostname)" "$password")" \
+      --data "$(python3 -c 'import json,sys; print(json.dumps({"checksum":sys.argv[1],"hostname":sys.argv[2],"password":sys.argv[3]}))' "$checksum" "$(hostname)" "$password")" \
       "$SERVER_URL/api/v1/token/claim")" || {
       echo "Token konnte nicht vom Server abgerufen werden." >&2
       exit 1
@@ -191,9 +194,11 @@ download_enrollment_token() {
 }
 
 template_token_available() {
-   local response
+   local checksum response
+   checksum="$(read_env_value "$LCS_CLIENT_ENV" LCS_TOKEN_CHECKSUM)"
+   [ -n "$checksum" ] || return 1
    response="$(curl -fsS "${CURL_PROXY_ARGS[@]}" -H 'Content-Type: application/json' \
-      --data "$(python3 -c 'import json,sys; print(json.dumps({"hostname":sys.argv[1]}))' "$(hostname)")" \
+      --data "$(python3 -c 'import json,sys; print(json.dumps({"checksum":sys.argv[1]}))' "$checksum")" \
       "$SERVER_URL/api/v1/token/check")" || {
       echo "Muster-Token konnte nicht mit dem Server abgeglichen werden." >&2
       exit 1
@@ -410,13 +415,15 @@ write_client_env() {
    ensure_server_url
    mkdir -p "$LCS_SERVICE_ROOT"
 
-   local proxy ca user_data require_local_username password_username default_password
+   local proxy ca user_data require_local_username password_username template_hostname token_checksum default_password
    proxy="$INSTALL_PROXY"
    [ -z "$proxy" ] && proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
    ca="$(read_env_value "$LCS_CLIENT_ENV" LCS_CA_FILE)"
    user_data="$(read_env_value "$LCS_CLIENT_ENV" LCS_USER_DATA)"
    require_local_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_USE_DOMAIN_USERNAME)"
    password_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_PASSWORD_USERNAME)"
+   template_hostname="$(read_env_value "$LCS_CLIENT_ENV" LCS_TEMPLATE_HOSTNAME)"
+   token_checksum="$(read_env_value "$LCS_CLIENT_ENV" LCS_TOKEN_CHECKSUM)"
    default_password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
    if [ -z "$password_username" ]; then
       read -r -p "Lokaler Benutzer [nutzer]: " password_username </dev/tty
@@ -451,6 +458,8 @@ EOF2
    [ -n "$user_data" ] && printf 'LCS_USER_DATA=%s\n' "$user_data" >> "$LCS_CLIENT_ENV"
    [ -n "$require_local_username" ] && printf 'LCS_USE_DOMAIN_USERNAME=%s\n' "$require_local_username" >> "$LCS_CLIENT_ENV"
    [ -n "$password_username" ] && printf 'LCS_PASSWORD_USERNAME=%s\n' "$password_username" >> "$LCS_CLIENT_ENV"
+   [ -n "$template_hostname" ] && printf 'LCS_TEMPLATE_HOSTNAME=%s\n' "$template_hostname" >> "$LCS_CLIENT_ENV"
+   [ -n "$token_checksum" ] && printf 'LCS_TOKEN_CHECKSUM=%s\n' "$token_checksum" >> "$LCS_CLIENT_ENV"
    chmod 644 "$LCS_CLIENT_ENV"
    chown root:root "$LCS_CLIENT_ENV"
 }
@@ -748,3 +757,7 @@ case "$MODE" in
       exit 2
       ;;
 esac
+
+if [ "$OPERATION" = upgrade ]; then
+   systemctl try-restart lcs-service.service 2>/dev/null || true
+fi
