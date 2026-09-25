@@ -357,6 +357,23 @@ function Remove-UserClientIntegration {
    Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\LCS Client.lnk')
 }
 
+function Reset-LocalLogin {
+   $username = Read-EnvValue $ClientEnv 'LCS_PASSWORD_USERNAME'
+   $password = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
+   if (-not $username) { $username = 'nutzer' }
+   if (-not $password) { $password = 'corvi' }
+
+   & net.exe user $username $password | Out-Null
+   if ($LASTEXITCODE) { throw "Standardpasswort für den lokalen Benutzer $username konnte nicht gesetzt werden." }
+
+   $winlogon = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Winlogon'
+   New-ItemProperty -Path $winlogon -Name 'AutoAdminLogon' -Value '1' -PropertyType String -Force | Out-Null
+   New-ItemProperty -Path $winlogon -Name 'DefaultUserName' -Value $username -PropertyType String -Force | Out-Null
+   New-ItemProperty -Path $winlogon -Name 'DefaultPassword' -Value $password -PropertyType String -Force | Out-Null
+   New-ItemProperty -Path $winlogon -Name 'DefaultDomainName' -Value $env:COMPUTERNAME -PropertyType String -Force | Out-Null
+   Write-Host "Standardpasswort und Autologin für $username wurden wiederhergestellt."
+}
+
 function New-RandomHex([int]$Bytes = 32) {
    $buffer = New-Object byte[] $Bytes
    $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
@@ -455,6 +472,7 @@ function Reset-Identity {
          throw 'Reset abgebrochen: Enrollment-Token konnte nicht vom Server geholt werden.'
       }
    }
+   Reset-LocalLogin
    & sc.exe stop LCSService 2>$null | Out-Null
    @('device.json', 'device-public.json', 'scheduler.json', 'pending-actions.json', 'result-outbox.json', 'event-outbox.json') |
       ForEach-Object { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $StateRoot $_) }
