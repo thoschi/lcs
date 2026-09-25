@@ -101,6 +101,10 @@ Bei Installation und Upgrade ergänzt der Installer fehlende Angaben zum lokalen
 Benutzer und dessen Standardpasswort interaktiv in der Client-Konfiguration.
 `reset-identity` stellt außerdem für den konfigurierten lokalen Benutzer das
 Standardpasswort wieder her und aktiviert unter Windows und Linux den Autologin.
+Unter Linux entfernt der Reset die Desktop-Schlüsselbunde des Musterbenutzers,
+damit geklonte Systeme weder dessen gespeicherte Geheimnisse übernehmen noch
+nach dessen altem GNOME-Keyring-Passwort fragen. Bei der erstmaligen lokalen
+Einrichtung werden etwaige Schlüsselbundreste älterer Images ebenfalls entfernt.
 Unter Windows startet die Nutzereinrichtung über den systemweiten `Run`-Eintrag
 bei jeder Benutzeranmeldung im richtigen Benutzerkontext. Sie wartet dauerhaft
 auf Anforderungen des Systemdienstes und bleibt auch nach einer abgeschlossenen

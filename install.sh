@@ -534,12 +534,15 @@ remove_client_integration() {
 }
 
 reset_local_login() {
-   local username password
+   local username password home
    username="$(read_env_value "$LCS_CLIENT_ENV" LCS_PASSWORD_USERNAME)"
    password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
    [ -n "$username" ] || { echo "LCS_PASSWORD_USERNAME fehlt in $LCS_CLIENT_ENV" >&2; return 1; }
    [ -n "$password" ] || { echo "LCS_DEFAULT_PASSWORD fehlt in $LCS_CLIENT_ENV" >&2; return 1; }
    id "$username" >/dev/null 2>&1 || { echo "Lokaler Benutzer nicht gefunden: $username" >&2; return 1; }
+   home="$(getent passwd "$username" | cut -d: -f6)"
+   [ -n "$home" ] || { echo "Home-Verzeichnis für $username nicht gefunden." >&2; return 1; }
+   rm -rf -- "$home/.local/share/keyrings"
    printf '%s:%s\n' "$username" "$password" | chpasswd
 
    python3 - "$username" <<'PY'

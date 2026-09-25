@@ -2,6 +2,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import socket
 import struct
 import subprocess
@@ -131,6 +132,17 @@ def restore_shadow_entry(username, entry):
    log('Passworthash wurde wiederhergestellt', local_username=username)
 
 
+def clear_linux_keyrings(username):
+   """Discard keyrings inherited from the image before the first personal login."""
+   import pwd
+   keyrings = Path(pwd.getpwnam(username).pw_dir) / '.local' / 'share' / 'keyrings'
+   if keyrings.is_symlink():
+      keyrings.unlink()
+   elif keyrings.exists():
+      shutil.rmtree(keyrings)
+   log('Geerbte Desktop-Schlüsselbunde wurden entfernt', local_username=username)
+
+
 def disable_autologin():
    log('Autologin wird deaktiviert', platform=os.name)
    if os.name == 'nt':
@@ -198,6 +210,7 @@ def initialize_user(config, username='', password='', force=False, client_userna
       result = subprocess.run(['chpasswd'], input=local_username + ':' + password, text=True, capture_output=True)
       if result.returncode:
          return {'ok': False, 'error': result.stderr.strip() or 'Passwort konnte nicht gesetzt werden.'}
+      clear_linux_keyrings(local_username)
    username = profile.get('username', '') if status['profile_exists'] else username
    if not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
       return {'ok': False, 'error': 'Ungültiger Benutzername.'}
