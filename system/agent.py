@@ -92,8 +92,8 @@ def initialization_status(config, local_username=''):
       system_marker = system_marker_path(config).read_text(encoding='utf-8').strip()
    except Exception:
       user_marker = system_marker = ''
-   required = not user_marker or user_marker != system_marker
    profile_exists = bool(profile.get('username')) and (os.name == 'nt' or bool(profile.get('shadow')))
+   required = not profile_exists or not user_marker or user_marker != system_marker
    username = profile.get('username', '')
    username_known = bool(username)
    return {'profile_exists': profile_exists, 'username_known': username_known, 'username': username,

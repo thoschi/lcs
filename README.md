@@ -81,9 +81,10 @@ Anmeldung die Zugangsdaten ab.
 
 Der System-Marker enthält keine Zugangsdaten. Er ist eine zufällige Kennung,
 die nach erfolgreicher Einrichtung sowohl im Systemzustand als auch neben dem
-Benutzerprofil gespeichert wird. Stimmen beide Kennungen überein, ist dieses
-Profil bereits auf genau diesem Client eingerichtet; fehlt eine davon oder
-weicht sie ab, wird die Einrichtung erneut ausgeführt.
+Benutzerprofil gespeichert wird. Stimmen beide Kennungen überein und enthält
+das Profil die plattformspezifischen Kontodaten, ist es auf genau diesem Client
+eingerichtet. Fehlt eine Kennung, weicht sie ab oder fehlt unter Linux die
+Shadow-Zeile, wird die Einrichtung erneut ausgeführt.
 
 Ist „Angemeldeten Domänenbenutzer übernehmen“ aktiviert, gilt die Einrichtung
 für jeden Domänenbenutzer getrennt. Sein Benutzername ist bereits bekannt; der
