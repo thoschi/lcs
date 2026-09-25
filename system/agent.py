@@ -307,6 +307,7 @@ def serve_user_client(config, runtime):
             return handle
 
       address = config.get('LCS_USER_SOCKET', r'\\.\pipe\lcs-user')
+      log('Benutzerschnittstelle wird gestartet', address=address)
       listener = UserPipeListener(address)
       try:
          while True:
@@ -314,8 +315,14 @@ def serve_user_client(config, runtime):
             with connection:
                try:
                   request = json.loads(connection.recv_bytes().decode('utf-8'))
+                  operation = request.get('operation')
+                  if operation != 'status' or time.time() - runtime.get('last_status_log', 0) >= 60:
+                     log('Benutzeranfrage empfangen', operation=operation,
+                         local_username=request.get('local_username', ''))
+                     runtime['last_status_log'] = time.time()
                   response = handle_user_request(config, runtime, request)
                except Exception as exc:
+                  log('Benutzeranfrage fehlgeschlagen', error='%s: %s' % (type(exc).__name__, exc))
                   response = {'ok': False, 'error': str(exc)}
                connection.send_bytes(json.dumps(response, ensure_ascii=False).encode('utf-8'))
       finally:
@@ -323,6 +330,7 @@ def serve_user_client(config, runtime):
       return
 
    path = Path(config.get('LCS_USER_SOCKET', '/run/lcs/user.sock'))
+   log('Benutzerschnittstelle wird gestartet', address=str(path))
    path.parent.mkdir(parents=True, exist_ok=True)
    path.unlink(missing_ok=True)
    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
@@ -349,8 +357,14 @@ def serve_user_client(config, runtime):
                      break
                   raw += chunk
                request = json.loads(raw.split(b'\n', 1)[0].decode('utf-8'))
+               operation = request.get('operation')
+               if operation != 'status' or time.time() - runtime.get('last_status_log', 0) >= 60:
+                  log('Benutzeranfrage empfangen', operation=operation,
+                      local_username=peer_username or request.get('local_username', ''))
+                  runtime['last_status_log'] = time.time()
                response = handle_user_request(config, runtime, request, peer_username)
             except Exception as exc:
+               log('Benutzeranfrage fehlgeschlagen', error='%s: %s' % (type(exc).__name__, exc))
                response = {'ok': False, 'error': str(exc)}
             connection.sendall(json.dumps(response, ensure_ascii=False).encode('utf-8') + b'\n')
 

@@ -12,6 +12,9 @@ RestartSec=10
 User=root
 WorkingDirectory=@SERVICE_ROOT@
 NoNewPrivileges=true
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=lcs-service
 
 [Install]
 WantedBy=multi-user.target
