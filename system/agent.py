@@ -227,11 +227,8 @@ def handle_user_request(config, runtime, request, peer_username=''):
    if operation == 'status':
       if runtime.get('image_source'):
          status = {'initialization_required': False}
-      elif env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
-         status = initialization_status(config, domain_username)
-         runtime['initialization_status'] = status
       else:
-         status = initialization_status(config)
+         status = initialization_status(config, domain_username)
          runtime['initialization_status'] = status
       if status.get('domain_username'):
          status['username'] = domain_username
@@ -255,13 +252,10 @@ def handle_user_request(config, runtime, request, peer_username=''):
    if operation == 'initialize':
       if runtime.get('image_source'):
          return {'ok': False, 'error': 'Auf Musterclients ist keine Nutzereinrichtung vorgesehen.'}
-      profile_username = domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else ''
+      profile_username = domain_username
       result = initialize_user(config, str(request.get('username', '')).strip(),
                                str(request.get('password', '')), client_username=profile_username)
-      if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
-         runtime['initialization_status'] = initialization_status(config, profile_username)
-      else:
-         refresh_initialization_status(config, runtime)
+      runtime['initialization_status'] = initialization_status(config, profile_username)
       return result
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
 
