@@ -346,9 +346,9 @@ def serve_user_client(config, runtime):
                   _pid, uid, _gid = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
                   import pwd
                   peer_username = pwd.getpwuid(uid).pw_name
-                  allowed_user = config['LCS_PASSWORD_USERNAME'].strip()
+                  allowed_uid = pwd.getpwnam(config['LCS_PASSWORD_USERNAME'].strip()).pw_uid
                   if (not env_bool(config, 'LCS_USE_DOMAIN_USERNAME') and
-                        uid != 0 and peer_username != allowed_user):
+                        uid not in (0, allowed_uid)):
                      raise PermissionError('Zugriff auf den LCS-Systemdienst verweigert.')
                raw = b''
                while b'\n' not in raw and len(raw) < 1024 * 1024:
