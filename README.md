@@ -116,6 +116,10 @@ deaktiviert und die Sitzung beendet. Stimmen Profil- und System-Marker bereits
 Windows und Linux verwenden gemeinsam `credentials.json`. LCS übernimmt daraus
 den Schulnetz-Login und zeigt ihn im Dialog ausgegraut an. Fehlt die lokale
 Passworteinrichtung, wird das Passwort erneut abgefragt und nicht gespeichert.
+Der mit dem Token übertragene Musterclient-Hostname entscheidet lokal, ob keine
+Nutzereinrichtung geprüft oder ausgeführt wird. Bei normalen Clients steuert
+allein der Profilstatus die Einrichtung; Autologin unterdrückt einen
+unvollständigen Vorgang nicht.
 
 Zum Prüfen und zum manuellen Testen in der angemeldeten Benutzersitzung:
 

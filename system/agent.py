@@ -103,7 +103,7 @@ def initialization_status(config, local_username=''):
 
 def refresh_initialization_status(config, runtime):
    """Keep the local-account decision in the privileged service."""
-   if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+   if runtime.get('image_source') or env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       return
    status = initialization_status(config)
    runtime['initialization_status'] = status
@@ -225,17 +225,14 @@ def handle_user_request(config, runtime, request, peer_username=''):
    operation = request.get('operation')
    domain_username = peer_username or str(request.get('local_username', '')).strip()
    if operation == 'status':
-      if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+      if runtime.get('image_source'):
+         status = {'initialization_required': False}
+      elif env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
          status = initialization_status(config, domain_username)
          runtime['initialization_status'] = status
       else:
          status = initialization_status(config)
          runtime['initialization_status'] = status
-      # Eine ausstehende Geräteregistrierung darf die lokale Einrichtung nicht
-      # verstecken. Nur ein sicher erkannter Musterclient wird ausgenommen.
-      if runtime.get('image_source'):
-         status = dict(status)
-         status['initialization_required'] = False
       if status.get('domain_username'):
          status['username'] = domain_username
       information = system_information(VERSION)
@@ -256,6 +253,8 @@ def handle_user_request(config, runtime, request, peer_username=''):
       result = execute_capability(cap_id, local_username)
       return {'ok': True, 'result': result}
    if operation == 'initialize':
+      if runtime.get('image_source'):
+         return {'ok': False, 'error': 'Auf Musterclients ist keine Nutzereinrichtung vorgesehen.'}
       profile_username = domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else ''
       result = initialize_user(config, str(request.get('username', '')).strip(),
                                str(request.get('password', '')), client_username=profile_username)
@@ -711,7 +710,9 @@ def run_forever(env_path=None, stop_requested=None):
    heartbeat_interval = int(config.get('LCS_HEARTBEAT_SECONDS', '20'))
    poll_interval = int(config.get('LCS_POLL_SECONDS', '10'))
    state = load_state(paths['state_dir'])
-   offline_image_source = (config.get('LCS_TEMPLATE_HOSTNAME', '').strip().lower() ==
+   _, token_template_hostname, _ = read_enrollment_token(config)
+   template_hostname = token_template_hostname or config.get('LCS_TEMPLATE_HOSTNAME', '')
+   offline_image_source = (template_hostname.strip().lower() ==
                            socket.gethostname().strip().lower())
    if state.get('device_id'):
       save_json(Path(paths['state_dir']) / 'device-public.json', {
@@ -725,9 +726,9 @@ def run_forever(env_path=None, stop_requested=None):
          action['capability_id'], parameters=action.get('parameters', {}))),
    }
    user_runtime = {'stack': stack,
-                   'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
-                   'image_source': bool(state.get('image_source', offline_image_source)),
-                   'role_resolved': bool(state.get('device_id') or config.get('LCS_TEMPLATE_HOSTNAME')),
+                   'client_enabled': bool(state.get('device_id') and not offline_image_source),
+                   'image_source': offline_image_source,
+                   'role_resolved': bool(state.get('device_id') or template_hostname),
                    'ready': False}
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       user_runtime['initialization_status'] = {'initialization_required': True}
@@ -751,7 +752,7 @@ def run_forever(env_path=None, stop_requested=None):
          log('Klon erkannt; lokale Geräteidentität wird verworfen', current_hostname=current_hostname)
          user_runtime['client_enabled'] = False
          user_runtime['image_source'] = offline_image_source
-         user_runtime['role_resolved'] = bool(config.get('LCS_TEMPLATE_HOSTNAME'))
+         user_runtime['role_resolved'] = bool(template_hostname)
          for filename in ('device.json', 'device-public.json'):
             (Path(paths['state_dir']) / filename).unlink(missing_ok=True)
 
