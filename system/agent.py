@@ -382,7 +382,7 @@ def save_state(state_dir, state):
 
 
 def save_server_settings(env_path, settings):
-   allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME')
+   allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME')
    path = Path(env_path)
    try:
       lines = path.read_text(encoding='utf-8').splitlines()
@@ -704,6 +704,8 @@ def run_forever(env_path=None, stop_requested=None):
    heartbeat_interval = int(config.get('LCS_HEARTBEAT_SECONDS', '20'))
    poll_interval = int(config.get('LCS_POLL_SECONDS', '10'))
    state = load_state(paths['state_dir'])
+   offline_image_source = (config.get('LCS_TEMPLATE_HOSTNAME', '').strip().lower() ==
+                           socket.gethostname().strip().lower())
    if state.get('device_id'):
       save_json(Path(paths['state_dir']) / 'device-public.json', {
          'device_id': state['device_id'],
@@ -717,8 +719,9 @@ def run_forever(env_path=None, stop_requested=None):
    }
    user_runtime = {'stack': stack,
                    'client_enabled': bool(state.get('device_id') and not state.get('image_source')),
-                   'image_source': bool(state.get('image_source')),
-                   'role_resolved': bool(state.get('device_id')), 'ready': False}
+                   'image_source': bool(state.get('image_source', offline_image_source)),
+                   'role_resolved': bool(state.get('device_id') or config.get('LCS_TEMPLATE_HOSTNAME')),
+                   'ready': False}
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       user_runtime['initialization_status'] = {'initialization_required': True}
    refresh_initialization_status(config, user_runtime)
@@ -740,8 +743,8 @@ def run_forever(env_path=None, stop_requested=None):
          state = {}
          log('Klon erkannt; lokale Geräteidentität wird verworfen', current_hostname=current_hostname)
          user_runtime['client_enabled'] = False
-         user_runtime['image_source'] = False
-         user_runtime['role_resolved'] = False
+         user_runtime['image_source'] = offline_image_source
+         user_runtime['role_resolved'] = bool(config.get('LCS_TEMPLATE_HOSTNAME'))
          for filename in ('device.json', 'device-public.json'):
             (Path(paths['state_dir']) / filename).unlink(missing_ok=True)
 

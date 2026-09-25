@@ -152,7 +152,7 @@ import sys
 
 path, raw = sys.argv[1:]
 settings = json.loads(raw).get('settings', {})
-allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME')
+allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME')
 lines = open(path, encoding='utf-8').read().splitlines() if os.path.exists(path) else []
 lines = [line for line in lines if not any(line.startswith(key + '=') for key in allowed)]
 for key in allowed:

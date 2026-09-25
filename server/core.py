@@ -332,6 +332,13 @@ def claim_enrollment_token(hostname, password):
    if len(matches) != 1:
       return 403, {'error': 'Passwort ist ungültig oder nicht eindeutig'}
    row = matches[0]
+   template_hostname = ''
+   if row['token_type'] == 'template':
+      template_hostname = row['hostname'] or hostname
+      if not row['hostname']:
+         with db() as conn:
+            conn.execute('UPDATE enrollment_tokens SET hostname=? WHERE id=?',
+                         (template_hostname, row['id']))
    # Bestehende, hostnamegebundene Zugänge bleiben während der Migration nutzbar.
    material = row['name'] + '\0' + ((row['hostname'] + '\0') if row['hostname'] else '') + str(password)
    token = hashlib.sha256(material.encode('utf-8')).hexdigest()
@@ -342,7 +349,9 @@ def claim_enrollment_token(hostname, password):
       settings = json.loads(row['settings_json'] or '{}')
    except (json.JSONDecodeError, TypeError):
       settings = {}
-   return 200, {'enrollment_token': token, 'template_hostname': row['hostname'], 'settings': settings}
+   if template_hostname:
+      settings['LCS_TEMPLATE_HOSTNAME'] = template_hostname
+   return 200, {'enrollment_token': token, 'template_hostname': template_hostname, 'settings': settings}
 
 
 def check_enrollment_token(supplied_hash, hostname=''):
