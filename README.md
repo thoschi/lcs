@@ -108,6 +108,9 @@ Autologin-Rechner bereits ein Profil vorhanden, stellt Linux dessen Shadow-Zeile
 wieder her; Windows fragt das Passwort erneut ab. Anschließend werden Autologin
 deaktiviert und die Sitzung beendet. Stimmen Profil- und System-Marker bereits
 überein, fährt der Dienst ohne Benutzerinteraktion mit der Registrierung fort.
+Ist nur das Profil des jeweils anderen Betriebssystems vorhanden, übernimmt LCS
+daraus den Schulnetz-Login und zeigt ihn im Dialog ausgegraut an. Das Passwort
+wird für Windows und Linux getrennt abgefragt und weiterhin nicht gespeichert.
 
 Zum Prüfen und zum manuellen Testen in der angemeldeten Benutzersitzung:
 

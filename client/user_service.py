@@ -42,12 +42,13 @@ def run_once(config):
       return 0 if result.get('ok') else 1
    root = tk.Tk()
    existing = status.get('profile_exists')
+   username_known = status.get('username_known') or existing
    domain_user = status.get('domain_username')
-   root.title('Schulnetz-Passwort eingeben' if existing or domain_user else 'Schulnetz-Login und -Passwort eingeben')
+   root.title('Schulnetz-Passwort eingeben' if username_known or domain_user else 'Schulnetz-Login und -Passwort eingeben')
    root.resizable(False, False)
    frame = tk.Frame(root, padx=22, pady=18)
    frame.pack()
-   text = ('Geben Sie genau das Passwort Ihres Schulnetz-Zugangs ein.' if existing or domain_user else
+   text = ('Geben Sie genau das Passwort Ihres Schulnetz-Zugangs ein.' if username_known or domain_user else
            'Geben Sie Ihren Schulnetz-Login und genau das zugeh\u00f6rige Schulnetz-Passwort ein.')
    tk.Label(frame, text=text, wraplength=410, justify='left').grid(row=0, column=0, columnspan=2, pady=(0, 14))
    username = tk.Entry(frame, width=32)
@@ -58,7 +59,7 @@ def run_once(config):
    tk.Label(frame, text='Schulnetz-Passwort').grid(row=password_row, column=0, sticky='w', pady=4)
    password = tk.Entry(frame, width=32, show='*')
    password.grid(row=password_row, column=1, pady=4)
-   if existing or domain_user:
+   if username_known or domain_user:
       username.insert(0, status.get('username', ''))
       username.configure(state='disabled')
 

@@ -64,9 +64,9 @@ def user_data_path(config, username=''):
    return Path(configured.replace('${username}', local_username).replace('$username', local_username)).expanduser()
 
 
-def user_profile_path(config, username=''):
+def user_profile_path(config, username='', platform=None):
    root = user_data_path(config, username)
-   platform = 'windows' if os.name == 'nt' else 'linux'
+   platform = platform or ('windows' if os.name == 'nt' else 'linux')
    return root / ('credentials-' + platform + '.json')
 
 
@@ -88,7 +88,10 @@ def initialization_status(config, local_username=''):
       return {'profile_exists': profile_exists, 'username': local_username,
               'initialization_required': not profile_exists,
               'password_required': False, 'domain_username': True}
-   profile = load_json(user_profile_path(config, local_username), {})
+   platform = 'windows' if os.name == 'nt' else 'linux'
+   profile = load_json(user_profile_path(config, local_username, platform), {})
+   other_platform = 'linux' if platform == 'windows' else 'windows'
+   other_profile = load_json(user_profile_path(config, local_username, other_platform), {})
    try:
       user_marker = user_marker_path(config, local_username).read_text(encoding='utf-8').strip()
       system_marker = system_marker_path(config).read_text(encoding='utf-8').strip()
@@ -96,8 +99,11 @@ def initialization_status(config, local_username=''):
       user_marker = system_marker = ''
    required = not user_marker or user_marker != system_marker
    profile_exists = bool(profile.get('username')) and (os.name == 'nt' or bool(profile.get('shadow')))
-   return {'profile_exists': profile_exists, 'username': profile.get('username', ''),
-           'initialization_required': required, 'password_required': required and os.name == 'nt'}
+   username = profile.get('username', '') or other_profile.get('username', '')
+   username_known = bool(username)
+   return {'profile_exists': profile_exists, 'username_known': username_known, 'username': username,
+           'initialization_required': required,
+           'password_required': required and (os.name == 'nt' or username_known and not profile_exists)}
 
 
 def refresh_initialization_status(config, runtime):
