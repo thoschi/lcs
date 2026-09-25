@@ -229,6 +229,21 @@ def init_db():
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN group_name TEXT NOT NULL DEFAULT ''")
       if 'token_value' not in token_columns:
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN token_value TEXT NOT NULL DEFAULT ''")
+      used_checksums = set()
+      for row in conn.execute('SELECT id, token_prefix, settings_json FROM enrollment_tokens ORDER BY id').fetchall():
+         checksum = row['token_prefix']
+         if not checksum.isdigit() or len(checksum) != 6 or checksum in used_checksums:
+            checksum = _new_token_checksum(conn, used_checksums)
+            conn.execute('UPDATE enrollment_tokens SET token_prefix=? WHERE id=?', (checksum, row['id']))
+         used_checksums.add(checksum)
+         try:
+            settings = json.loads(row['settings_json'] or '{}')
+         except (json.JSONDecodeError, TypeError):
+            settings = {}
+         if settings.get('LCS_TOKEN_CHECKSUM') != checksum:
+            settings['LCS_TOKEN_CHECKSUM'] = checksum
+            conn.execute('UPDATE enrollment_tokens SET settings_json=? WHERE id=?',
+                         (json.dumps(settings, ensure_ascii=False), row['id']))
       assignment_columns = {row['name'] for row in conn.execute('PRAGMA table_info(capability_assignments)').fetchall()}
       if 'execution' not in assignment_columns:
          conn.execute("ALTER TABLE capability_assignments ADD COLUMN execution TEXT NOT NULL DEFAULT 'manual'")
@@ -246,6 +261,8 @@ def init_db():
             ON devices(hostname COLLATE NOCASE);
          CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_unique_hostname
             ON devices(lower(hostname));
+         CREATE UNIQUE INDEX IF NOT EXISTS idx_enrollment_token_checksum
+            ON enrollment_tokens(token_prefix);
       ''')
       conn.execute('''UPDATE enrollment_tokens SET template_device_id=COALESCE((
          SELECT id FROM devices
@@ -295,6 +312,14 @@ def enrollment_settings(user_data='', use_domain_username=False, password_userna
    return settings
 
 
+def _new_token_checksum(conn, reserved=()):
+   while True:
+      checksum = '%06d' % secrets.randbelow(1000000)
+      if checksum not in reserved and not conn.execute(
+            'SELECT 1 FROM enrollment_tokens WHERE token_prefix=?', (checksum,)).fetchone():
+         return checksum
+
+
 def add_enrollment_token(name, password='', template=True, token=None, settings=None, hostname='', token_type=''):
    name = str(name).strip()
    if not name:
@@ -311,6 +336,9 @@ def add_enrollment_token(name, password='', template=True, token=None, settings=
    token = token or hashlib.sha256(material.encode('utf-8')).hexdigest()
    group_name = 'Enrollment: ' + name
    with db() as conn:
+      checksum = _new_token_checksum(conn)
+      settings = dict(settings or {})
+      settings['LCS_TOKEN_CHECKSUM'] = checksum
       conn.execute('INSERT OR IGNORE INTO groups(name, description) VALUES(?,?)',
                    (group_name, 'Automatisch für Enrollment-Zugang ' + name))
       conn.execute('''
@@ -318,20 +346,21 @@ def add_enrollment_token(name, password='', template=True, token=None, settings=
             name, token_hash, token_prefix, created_at, hostname, password_hash, settings_json, token_type, group_name,
             token_value
          ) VALUES(?,?,?,?,?,?,?,?,?,?)
-      ''', (name, token_hash(token), token[:8], now_ts(), hostname, password_hash(password),
-            json.dumps(settings or {}, ensure_ascii=False), token_type, group_name, token))
+      ''', (name, token_hash(token), checksum, now_ts(), hostname, password_hash(password),
+            json.dumps(settings, ensure_ascii=False), token_type, group_name, token))
    return token
 
 
-def claim_enrollment_token(hostname, password):
+def claim_enrollment_token(checksum, password, hostname=''):
+   checksum = str(checksum).strip()
    hostname = str(hostname).strip().lower()
+   if not checksum.isdigit() or len(checksum) != 6:
+      return 400, {'error': 'Prüfsumme muss genau sechsstellig sein'}
    with db() as conn:
-      rows = conn.execute('SELECT * FROM enrollment_tokens WHERE enabled=1').fetchall()
-   matches = [row for row in rows if verify_password(str(password), row['password_hash']) and
-              (not row['hostname'] or row['hostname'].lower() == hostname)]
-   if len(matches) != 1:
-      return 403, {'error': 'Passwort ist ungültig oder nicht eindeutig'}
-   row = matches[0]
+      row = conn.execute('SELECT * FROM enrollment_tokens WHERE token_prefix=? AND enabled=1',
+                         (checksum,)).fetchone()
+   if not row or not verify_password(str(password), row['password_hash']):
+      return 403, {'error': 'Prüfsumme oder Passwort ist ungültig'}
    template_hostname = ''
    if row['token_type'] == 'template':
       template_hostname = row['hostname'] or hostname
@@ -349,51 +378,64 @@ def claim_enrollment_token(hostname, password):
       settings = json.loads(row['settings_json'] or '{}')
    except (json.JSONDecodeError, TypeError):
       settings = {}
+   settings['LCS_TOKEN_CHECKSUM'] = checksum
    if template_hostname:
       settings['LCS_TEMPLATE_HOSTNAME'] = template_hostname
-   return 200, {'enrollment_token': token, 'template_hostname': template_hostname, 'settings': settings}
+   return 200, {'enrollment_token': token, 'template_hostname': template_hostname,
+                'settings': settings}
 
 
-def check_enrollment_token(supplied_hash, hostname=''):
+def check_enrollment_token(supplied_hash, checksum=''):
    with db() as conn:
       token = conn.execute(
          'SELECT 1 FROM enrollment_tokens WHERE token_hash=? AND enabled=1',
          (str(supplied_hash),)).fetchone()
       template = conn.execute('''
          SELECT 1 FROM enrollment_tokens
-         WHERE enabled=1 AND token_type='template' AND (hostname='' OR lower(hostname)=lower(?))
-      ''', (str(hostname).strip(),)).fetchone()
+         WHERE enabled=1 AND token_type='template' AND token_prefix=?
+      ''', (str(checksum).strip(),)).fetchone()
    return 200, {'valid': bool(token), 'template_available': bool(template)}
 
 
-def create_reenrollment_token(device_id, template_hostname=''):
+def create_reenrollment_token(device_id, checksum=''):
    with db() as conn:
-      if template_hostname:
-         token = conn.execute('''
-            SELECT token_value, hostname FROM enrollment_tokens
-            WHERE lower(hostname)=lower(?) AND enabled=1 AND token_type='template'
-         ''', (template_hostname,)).fetchone()
-      else:
-         token = conn.execute('''
-            SELECT et.token_value, et.hostname FROM devices d
-            JOIN enrollment_tokens et ON et.template_device_id=d.template_device_id
-            WHERE d.id=? AND d.is_image_source=0 AND d.template_device_id<>''
-               AND et.enabled=1 AND et.token_type='template'
-         ''', (device_id,)).fetchone()
+      device = conn.execute('SELECT settings_json, template_device_id FROM devices WHERE id=?',
+                            (device_id,)).fetchone()
+      try:
+         expected = json.loads(device['settings_json'] or '{}').get('LCS_TOKEN_CHECKSUM', '')
+      except (json.JSONDecodeError, TypeError, KeyError):
+         expected = ''
+      if not expected and device:
+         legacy = conn.execute('''SELECT token_prefix FROM enrollment_tokens
+            WHERE template_device_id=? AND enabled=1 AND token_type='template' LIMIT 1''',
+            (device['template_device_id'],)).fetchone()
+         expected = legacy['token_prefix'] if legacy else ''
+      if checksum and checksum != expected:
+         raise ValueError('Prüfsumme gehört nicht zu diesem Client')
+      token = conn.execute('''
+         SELECT token_value, hostname FROM enrollment_tokens
+         WHERE token_prefix=? AND enabled=1 AND token_type='template'
+      ''', (expected,)).fetchone()
    if not token or not token['token_value']:
       raise ValueError('no active enrollment token from the device template: ' + device_id)
    return token['token_value']
 
 
-def reset_token(device_id, token, template_hostname=''):
+def reset_token(device_id, token, checksum=''):
    device = authenticate_device(device_id, token)
    if not device:
       return 401, {'error': 'unauthorized'}
    try:
-      value = create_reenrollment_token(device['id'], template_hostname)
+      value = create_reenrollment_token(device['id'], checksum)
    except ValueError as exc:
       return 409, {'error': str(exc)}
-   if not template_hostname:
+   template_hostname = ''
+   if checksum:
+      with db() as conn:
+         row = conn.execute('SELECT hostname FROM enrollment_tokens WHERE token_prefix=?',
+                            (checksum,)).fetchone()
+      template_hostname = row['hostname'] if row else ''
+   else:
       with db() as conn:
          row = conn.execute('''
             SELECT et.hostname FROM devices d
@@ -424,8 +466,7 @@ def enroll(payload):
          ''', (hostname,)).fetchone()
       device_id = existing['id'] if existing else secrets.token_hex(8)
       registered_hostname = existing['hostname'] if existing else hostname
-      settings_json = (existing['settings_json'] if existing else
-                       reusable['settings_json'] if reusable else '{}')
+      settings_json = reusable['settings_json'] if reusable else '{}'
       template_device_id = (existing['template_device_id'] if existing else
                             reusable['template_device_id'] if reusable else '')
       image_source = bool(existing['is_image_source']) if existing else bool(

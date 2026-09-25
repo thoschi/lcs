@@ -409,7 +409,8 @@ def save_state(state_dir, state):
 
 
 def save_server_settings(env_path, settings):
-   allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME')
+   allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME',
+              'LCS_TEMPLATE_HOSTNAME', 'LCS_TOKEN_CHECKSUM')
    path = Path(env_path)
    try:
       lines = path.read_text(encoding='utf-8').splitlines()
@@ -451,11 +452,12 @@ def enroll(config, state_dir):
    log('Registrierungsantwort empfangen', status=status)
    if status != 200:
       raise RuntimeError('Enrollment failed: %s' % response)
-   save_server_settings(runtime_paths(config)['env'], response.get('settings', {}))
-   log('Servereinstellungen gespeichert', keys=sorted(response.get('settings', {}).keys()))
-   for key in ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME'):
-      if response.get('settings', {}).get(key):
-         config[key] = str(response['settings'][key])
+   if not response.get('image_source'):
+      save_server_settings(runtime_paths(config)['env'], response.get('settings', {}))
+      log('Servereinstellungen gespeichert', keys=sorted(response.get('settings', {}).keys()))
+      for key in ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME'):
+         if response.get('settings', {}).get(key):
+            config[key] = str(response['settings'][key])
    registered_hostname = str(response.get('hostname') or current_hostname)
    restart_required = False
    if registered_hostname.lower() != current_hostname.lower():

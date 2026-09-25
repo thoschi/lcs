@@ -272,12 +272,13 @@ def agent_api(endpoint):
    device_id = request.headers.get('X-Device-ID', '')
    routes = {
       'enroll': lambda: core.enroll(payload),
-      'token/claim': lambda: core.claim_enrollment_token(payload.get('hostname', ''), payload.get('password', '')),
-      'token/check': lambda: core.check_enrollment_token(payload.get('token_hash', ''), payload.get('hostname', '')),
+      'token/claim': lambda: core.claim_enrollment_token(payload.get('checksum', ''), payload.get('password', ''),
+                                                         payload.get('hostname', '')),
+      'token/check': lambda: core.check_enrollment_token(payload.get('token_hash', ''), payload.get('checksum', '')),
       'heartbeat': lambda: core.heartbeat(device_id, bearer(), payload),
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
-      'reset-token': lambda: core.reset_token(device_id, bearer(), payload.get('template_hostname', '')),
+      'reset-token': lambda: core.reset_token(device_id, bearer(), payload.get('checksum', '')),
       'device/self-delete': lambda: core.self_delete(device_id, bearer()),
       'user/login': lambda: core.user_login(payload),
       'user/heartbeat': lambda: core.user_heartbeat(bearer()),
@@ -523,8 +524,11 @@ def create_token():
    except Exception as exc:
       flash(str(exc), 'error')
       return redirect(url_for('admin_tokens') + '#tokens')
+   with core.db() as conn:
+      checksum = conn.execute('SELECT token_prefix FROM enrollment_tokens WHERE token_hash=?',
+                              (core.token_hash(token),)).fetchone()['token_prefix']
    flash('Vorläufiger Zugang erzeugt. Er wird beim ersten Enrollment aktiviert.', 'success')
-   return render_admin(new_token=token, page='tokens')
+   return render_admin(new_token=checksum, page='tokens')
 
 
 @app.post('/admin/token/<int:token_id>/toggle')
