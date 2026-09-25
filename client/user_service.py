@@ -26,15 +26,20 @@ def run_once(config):
       except Exception:
          pass
       time.sleep(2)
+   def initialize_and_logout(**payload):
+      result = request(config, 'initialize', **payload)
+      if not result.get('ok'):
+         return result
+      logout = request(config, 'execute', capability_id='logout')
+      return logout if not logout.get('ok') else result
+
    # Linux can restore a saved shadow record without asking the user anything.
-   if status.get('domain_username') and not status.get('password_required'):
-      result = request(config, 'initialize')
+   if os.name != 'nt' and status.get('domain_username') and not status.get('password_required'):
+      result = initialize_and_logout()
       return 0 if result.get('ok') else 1
    if status.get('profile_exists') and not status.get('password_required'):
-      result = request(config, 'initialize')
-      if result.get('ok'):
-         result = request(config, 'execute', capability_id='logout')
-         return 0 if result.get('ok') else 1
+      result = initialize_and_logout()
+      return 0 if result.get('ok') else 1
    root = tk.Tk()
    existing = status.get('profile_exists')
    domain_user = status.get('domain_username')
