@@ -17,15 +17,7 @@ def debug(message, **fields):
    details = ' '.join('%s=%r' % item for item in fields.items())
    line = '%s [lcs-userservice] DEBUG %s%s' % (
       time.strftime('%Y-%m-%dT%H:%M:%S%z'), message, (' ' + details) if details else '')
-   print(line, file=sys.stderr, flush=True)
-   if os.name != 'nt':
-      try:
-         state_dir = Path(os.environ.get('XDG_STATE_HOME', Path.home() / '.local' / 'state')) / 'lcs'
-         state_dir.mkdir(parents=True, exist_ok=True)
-         with (state_dir / 'user-service.log').open('a', encoding='utf-8') as stream:
-            stream.write(line + '\n')
-      except Exception:
-         pass
+   print(line, flush=True)
 
 
 def config_path():
@@ -143,5 +135,5 @@ if __name__ == '__main__':
       raise SystemExit(main())
    except Exception as exc:
       debug('Nutzerservice unerwartet beendet', error='%s: %s' % (type(exc).__name__, exc))
-      traceback.print_exc()
+      traceback.print_exc(file=sys.stdout)
       raise

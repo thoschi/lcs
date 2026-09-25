@@ -123,16 +123,6 @@ unvollständigen Vorgang nicht.
 
 Zum Prüfen und zum manuellen Testen in der angemeldeten Benutzersitzung:
 
-Unter Linux protokolliert der Systemdienst im Journal. Der Nutzerservice schreibt
-seine Start-, Status- und Fehlerdiagnose zusätzlich nach
-`~/.local/state/lcs/user-service.log` (beziehungsweise unter
-`$XDG_STATE_HOME/lcs/user-service.log`):
-
-```bash
-journalctl -u lcs-service.service -f
-tail -f "${XDG_STATE_HOME:-$HOME/.local/state}/lcs/user-service.log"
-```
-
 ```powershell
 Get-ItemProperty 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run' `
    -Name 'LCS User Service'
