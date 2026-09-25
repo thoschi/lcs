@@ -190,7 +190,7 @@ function Clear-Runtime([string]$Root, [string[]]$Keep) {
 }
 
 function Set-ServerSettings($Settings) {
-   $allowed = @('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME')
+   $allowed = @('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME')
    $lines = if (Test-Path $ClientEnv) { @(Get-Content -LiteralPath $ClientEnv) } else { @() }
    $lines = @($lines | Where-Object {
       $line = $_

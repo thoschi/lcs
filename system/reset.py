@@ -10,18 +10,23 @@ from common.config import load_env
 
 def main(env_path):
    config = load_env(env_path)
+   required = ('LCS_SERVER', 'LCS_TEMPLATE_HOSTNAME')
+   missing = [key for key in required if not config.get(key, '').strip()]
+   if missing:
+      raise RuntimeError('Erforderliche Einträge fehlen in %s: %s' %
+                         (env_path, ', '.join(missing)))
    paths = runtime_paths(config)
    state = load_state(paths['state_dir'])
    if not state.get('device_id'):
       return 0
    status, response = post_device(config, state, '/api/v1/reset-token', {
-      'template_hostname': state.get('template_hostname', ''),
+      'template_hostname': config['LCS_TEMPLATE_HOSTNAME'],
    })
    if status != 200 or not response.get('enrollment_token'):
       raise RuntimeError(response.get('error', 'Reset-Token konnte nicht geladen werden.'))
    token = Path(paths['token'])
    token.parent.mkdir(parents=True, exist_ok=True)
-   template_hostname = response.get('template_hostname', state.get('template_hostname', ''))
+   template_hostname = response.get('template_hostname', config['LCS_TEMPLATE_HOSTNAME'])
    token.write_text(response['enrollment_token'] + '\n' + template_hostname + '\n', encoding='utf-8')
    token.chmod(0o600)
    return 0
