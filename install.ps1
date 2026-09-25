@@ -451,7 +451,7 @@ function Reset-Identity {
       $python = Join-Path $ServiceRoot 'venv\Scripts\python.exe'
       & $python (Join-Path $ServiceRoot 'reset.py') $ClientEnv
       if ($LASTEXITCODE) {
-         & (Join-Path $ServiceRoot 'windows\windows_service.py') start
+         & $python (Join-Path $ServiceRoot 'windows\windows_service.py') start
          throw 'Reset abgebrochen: Enrollment-Token konnte nicht vom Server geholt werden.'
       }
    }
