@@ -65,9 +65,7 @@ def user_data_path(config, username=''):
 
 
 def user_profile_path(config, username=''):
-   root = user_data_path(config, username)
-   platform = 'windows' if os.name == 'nt' else 'linux'
-   return root / ('credentials-' + platform + '.json')
+   return user_data_path(config, username) / 'credentials.json'
 
 
 def system_marker_path(config):
@@ -96,8 +94,11 @@ def initialization_status(config, local_username=''):
       user_marker = system_marker = ''
    required = not user_marker or user_marker != system_marker
    profile_exists = bool(profile.get('username')) and (os.name == 'nt' or bool(profile.get('shadow')))
-   return {'profile_exists': profile_exists, 'username': profile.get('username', ''),
-           'initialization_required': required, 'password_required': required and os.name == 'nt'}
+   username = profile.get('username', '')
+   username_known = bool(username)
+   return {'profile_exists': profile_exists, 'username_known': username_known, 'username': username,
+           'initialization_required': required,
+           'password_required': required and (os.name == 'nt' or username_known and not profile_exists)}
 
 
 def refresh_initialization_status(config, runtime):
@@ -204,6 +205,8 @@ def initialize_user(config, username='', password='', force=False, client_userna
    stored = {'username': username}
    if os.name != 'nt':
       stored['shadow'] = shadow_entry(local_username)
+   elif profile.get('shadow'):
+      stored['shadow'] = profile['shadow']
    save_json(profile_path, stored, 0o600)
    marker = os.urandom(24).hex()
    user_marker_path(config, client_username).write_text(marker + '\n', encoding='utf-8')
