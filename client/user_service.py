@@ -33,8 +33,8 @@ def run_once(config):
    if status.get('profile_exists') and not status.get('password_required'):
       result = request(config, 'initialize')
       if result.get('ok'):
-         request(config, 'execute', capability_id='logout')
-         return 0
+         result = request(config, 'execute', capability_id='logout')
+         return 0 if result.get('ok') else 1
    root = tk.Tk()
    existing = status.get('profile_exists')
    domain_user = status.get('domain_username')
@@ -64,11 +64,12 @@ def run_once(config):
          messagebox.showerror(root.title(), result.get('error', 'Einrichtung fehlgeschlagen.'))
          return
       root.withdraw()
-      try:
-         if not domain_user:
-            request(config, 'execute', capability_id='logout')
-      finally:
-         root.destroy()
+      result = request(config, 'execute', capability_id='logout')
+      if not result.get('ok'):
+         root.deiconify()
+         messagebox.showerror(root.title(), result.get('error', 'Abmeldung fehlgeschlagen.'))
+         return
+      root.destroy()
 
    button_text = 'LCS einrichten' if domain_user else 'Lokales Konto einrichten'
    button = tk.Button(frame, text=button_text, command=submit)
