@@ -46,7 +46,7 @@ Aufruf:
   $0 service https://clients.example --token-file /pfad/zur/token-datei
   $0 client https://clients.example
   $0 install workstation https://clients.example [--no-userclient]
-  $0 upgrade workstation https://clients.example [--no-userclient]
+  $0 upgrade workstation [https://clients.example] [--no-userclient]
   $0 uninstall [server|service|client|workstation|all]
   $0 all https://clients.example
   $0 reset-identity
@@ -70,6 +70,8 @@ Optionen:
 
 Optionale Umgebung:
   LCS_PROXY=URL        Proxy für Installation und späteren Systemdienst
+
+Beim Upgrade wird die Server-URL aus der vorhandenen client.env übernommen.
 
 Standardziele:
   Server:       /opt/lcs-server
@@ -119,6 +121,13 @@ while [ $# -gt 0 ]; do
 done
 
 ensure_server_url() {
+   if [ -z "$SERVER_URL" ] && [ "$OPERATION" = upgrade ]; then
+      if [ "$MODE" = linbo ]; then
+         SERVER_URL="$(read_env_value "$LCS_LINBO_ROOT/client.env" LCS_SERVER)"
+      else
+         SERVER_URL="$(read_env_value "$LCS_CLIENT_ENV" LCS_SERVER)"
+      fi
+   fi
    if [ -z "$SERVER_URL" ]; then
       echo "Für $MODE fehlt die Server-URL." >&2
       usage

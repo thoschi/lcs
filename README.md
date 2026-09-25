@@ -57,8 +57,10 @@ separat installiert:
 ```
 
 `upgrade` ersetzt dabei nur Programmcode; State, Enrollment-Token und `.env`
-bleiben erhalten. Eine erneute `install` entfernt dagegen vorhandene Reste der
-jeweiligen Komponente. `reset-identity` fordert zuerst authentifiziert genau den
+bleiben erhalten. Die Server-URL muss beim Upgrade von Systemdienst,
+User-Client oder Workstation nicht erneut angegeben werden, da der Installer
+sie aus der vorhandenen `client.env` liest. Eine erneute `install` entfernt
+dagegen vorhandene Reste der jeweiligen Komponente. `reset-identity` fordert zuerst authentifiziert genau den
 Enrollment-Token des lokal gespeicherten Musterclient-Hostnamens an und bricht
 bei Nichterreichbarkeit sicher ab. Heruntergeladene Token-Dateien enthalten
 dafür in der zweiten Zeile den Hostnamen; ältere einzeilige Dateien bleiben

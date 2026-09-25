@@ -44,7 +44,7 @@ Aufruf:
   .\install.ps1 install service https://clients.example --token-file C:\Pfad\token.txt
   .\install.ps1 install client https://clients.example
   .\install.ps1 install workstation https://clients.example --token-file C:\Pfad\token.txt [--no-userclient]
-  .\install.ps1 upgrade workstation https://clients.example [--no-userclient]
+  .\install.ps1 upgrade workstation [https://clients.example] [--no-userclient]
   .\install.ps1 install all https://clients.example
   .\install.ps1 uninstall [server|service|client|workstation|all]
   .\install.ps1 diagnose service
@@ -54,6 +54,7 @@ install und upgrade entsprechen den gleichnamigen Operationen von install.sh.
 Alle Laufzeitpfade können über
 LCS_*_ROOT bzw. LCS_*_ENV überschrieben werden.
 Optional verwendet LCS_PROXY einen Proxy für Installation und Systemdienst.
+Beim Upgrade wird die Server-URL aus der vorhandenen client.env übernommen.
 "@
 }
 
@@ -82,6 +83,9 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 }
 
 function Require-ServerUrl {
+   if (-not $ServerUrl -and $Operation -eq 'upgrade') {
+      $script:ServerUrl = Read-EnvValue $ClientEnv 'LCS_SERVER'
+   }
    if (-not $ServerUrl) { Write-Error "Für $Mode fehlt die Server-URL."; Show-Usage; exit 2 }
 }
 
