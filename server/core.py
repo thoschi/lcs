@@ -290,7 +290,7 @@ def enrollment_settings(user_data='', use_domain_username=False, password_userna
    password_username = str(password_username).strip()
    if '\n' in password_username or '\r' in password_username:
       raise ValueError('Systembenutzername darf keinen Zeilenumbruch enthalten')
-   if password_username and not use_domain_username:
+   if password_username:
       settings['LCS_PASSWORD_USERNAME'] = password_username
    return settings
 

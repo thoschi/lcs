@@ -84,16 +84,15 @@ def run_once(config):
            'Geben Sie Ihren Schulnetz-Login und genau das zugeh\u00f6rige Schulnetz-Passwort ein.')
    tk.Label(frame, text=text, wraplength=410, justify='left').grid(row=0, column=0, columnspan=2, pady=(0, 14))
    username = tk.Entry(frame, width=32)
-   if not domain_user:
-      tk.Label(frame, text='Schulnetz-Login').grid(row=1, column=0, sticky='w', pady=4)
-      username.grid(row=1, column=1, pady=4)
-   password_row = 1 if domain_user else 2
+   tk.Label(frame, text='Schulnetz-Login').grid(row=1, column=0, sticky='w', pady=4)
+   username.grid(row=1, column=1, pady=4)
+   password_row = 2
    tk.Label(frame, text='Schulnetz-Passwort').grid(row=password_row, column=0, sticky='w', pady=4)
    password = tk.Entry(frame, width=32, show='*')
    password.grid(row=password_row, column=1, pady=4)
    if username_known or domain_user:
       username.insert(0, status.get('username', ''))
-      username.configure(state='disabled')
+      username.configure(state='readonly')
 
    def submit():
       debug('Initialisierung aus dem Dialog wird angefordert', username_entered=bool(username.get().strip()))
