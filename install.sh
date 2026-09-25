@@ -61,7 +61,7 @@ service        privilegierten LCS-Systemdienst installieren/aktualisieren
 client         grafischen LCS-User-Client installieren/aktualisieren
 workstation    Systemdienst + User-Client installieren/aktualisieren
 all            Server + Systemdienst + User-Client auf diesem Rechner
-reset-identity lokale Geräteidentität explizit löschen (Dienst wird gestoppt)
+reset-identity Geräteidentität löschen, Standardlogin wiederherstellen (Dienst wird gestoppt)
 
 Optionen:
   --token-file DATEI   Enrollment-Token für einen frischen Systemdienst
@@ -510,6 +510,55 @@ remove_client_integration() {
    rm -f "$LCS_APPLICATIONS_ROOT/lcs-client.desktop"
 }
 
+reset_local_login() {
+   local username password
+   username="$(read_env_value "$LCS_CLIENT_ENV" LCS_PASSWORD_USERNAME)"
+   password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
+   username="${username:-nutzer}"
+   password="${password:-corvi}"
+   id "$username" >/dev/null 2>&1 || { echo "Lokaler Benutzer nicht gefunden: $username" >&2; return 1; }
+   printf '%s:%s\n' "$username" "$password" | chpasswd
+
+   python3 - "$username" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+username = sys.argv[1]
+
+def set_value(text, section, key, value):
+   replacement = key + '=' + value
+   header = re.search(r'(?im)^\s*\[' + re.escape(section) + r'\]\s*$', text)
+   if header:
+      end = re.search(r'(?m)^\s*\[', text[header.end():])
+      section_end = header.end() + (end.start() if end else len(text[header.end():]))
+      block = text[header.end():section_end]
+      pattern = r'(?im)^\s*' + re.escape(key) + r'\s*=.*$'
+      if re.search(pattern, block):
+         block = re.sub(pattern, replacement, block)
+      else:
+         block = '\n' + replacement + block
+      return text[:header.end()] + block + text[section_end:]
+   return text.rstrip() + '\n\n[' + section + ']\n' + replacement + '\n'
+
+configs = (
+   ('/etc/gdm3/custom.conf', 'daemon', (('AutomaticLoginEnable', 'True'), ('AutomaticLogin', username))),
+   ('/etc/gdm/custom.conf', 'daemon', (('AutomaticLoginEnable', 'True'), ('AutomaticLogin', username))),
+   ('/etc/lightdm/lightdm.conf', 'Seat:*', (('autologin-user', username),)),
+   ('/etc/sddm.conf', 'Autologin', (('User', username),)),
+)
+for filename, section, values in configs:
+   path = Path(filename)
+   if not path.is_file():
+      continue
+   text = path.read_text(encoding='utf-8')
+   for key, value in values:
+      text = set_value(text, section, key, value)
+   path.write_text(text, encoding='utf-8')
+PY
+   echo "Standardpasswort und Autologin für $username wurden wiederhergestellt."
+}
+
 reset_identity() {
    systemctl stop lcs-service.service 2>/dev/null || true
    if [ -s "$LCS_STATE_ROOT/device.json" ]; then
@@ -519,6 +568,7 @@ reset_identity() {
          exit 1
       }
    fi
+   reset_local_login
    rm -f \
       "$LCS_STATE_ROOT/device.json" \
       "$LCS_STATE_ROOT/device-public.json" \
