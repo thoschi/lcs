@@ -57,16 +57,16 @@ def runtime_paths(config):
    }
 
 
-def user_data_path(config, username=''):
-   local_username = username or config['LCS_PASSWORD_USERNAME'].strip()
+def user_data_path(config, path_username=''):
+   local_username = path_username or config['LCS_PASSWORD_USERNAME'].strip()
    default = (str(Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username / 'AppData' / 'Roaming' / 'LCS')
               if os.name == 'nt' else '/home/%s/.config/lcs' % local_username)
    configured = config.get('LCS_USER_DATA', default)
-   return Path(configured.replace('${username}', local_username).replace('$username', local_username)).expanduser()
+   return Path(configured.replace('${username}', local_username).replace('$username', local_username))
 
 
-def user_profile_path(config, username=''):
-   return user_data_path(config, username) / 'credentials.json'
+def user_profile_path(config, path_username=''):
+   return user_data_path(config, path_username) / 'credentials.json'
 
 
 def system_marker_path(config):
@@ -75,9 +75,9 @@ def system_marker_path(config):
    return Path(config.get('LCS_SYSTEM_MARKER', default))
 
 
-def user_marker_path(config, username=''):
+def user_marker_path(config, path_username=''):
    platform = 'windows' if os.name == 'nt' else 'linux'
-   return user_profile_path(config, username).with_name('system-marker-' + platform)
+   return user_profile_path(config, path_username).with_name('system-marker-' + platform)
 
 
 def initialization_status(config, local_username=''):
@@ -237,11 +237,12 @@ def user_capabilities(stack):
 def handle_user_request(config, runtime, request, peer_username=''):
    operation = request.get('operation')
    domain_username = peer_username or str(request.get('local_username', '')).strip()
+   profile_username = domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else ''
    if operation == 'status':
       if runtime.get('image_source'):
          status = {'initialization_required': False}
       else:
-         status = initialization_status(config, domain_username)
+         status = initialization_status(config, profile_username)
          runtime['initialization_status'] = status
       if status.get('domain_username'):
          status['username'] = domain_username
@@ -265,7 +266,6 @@ def handle_user_request(config, runtime, request, peer_username=''):
    if operation == 'initialize':
       if runtime.get('image_source'):
          return {'ok': False, 'error': 'Auf Musterclients ist keine Nutzereinrichtung vorgesehen.'}
-      profile_username = domain_username
       result = initialize_user(config, str(request.get('username', '')).strip(),
                                str(request.get('password', '')), client_username=profile_username)
       runtime['initialization_status'] = initialization_status(config, profile_username)

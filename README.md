@@ -67,9 +67,11 @@ dafür in der zweiten Zeile den Hostnamen; ältere einzeilige Dateien bleiben
 lesbar.
 
 `LCS_USER_DATA` kann in der lokalen Client-Konfiguration gesetzt werden.
-`$username` oder `${username}` wird zur Laufzeit durch den lokalen
-Sitzungsbenutzer ersetzt. Standardmäßig sind dies unter Linux
-`/home/<benutzer>/.config/lcs` und unter Windows das LCS-Verzeichnis in AppData.
+Der mit dem Token übergebene Pfad wird unter Windows und Linux unverändert
+verwendet. Enthält er ausdrücklich `$username` oder `${username}`, wird nur
+diese Variable bei der Pfadermittlung durch den betreffenden Benutzernamen ersetzt.
+Ohne diese Angabe liegt das LCS-Verzeichnis standardmäßig unter Linux in
+`/home/<konfigurierter-benutzer>/.config/lcs` und unter Windows in dessen AppData.
 
 `workstation` installiert auf beiden Plattformen den privilegierten
 Systemdienst und die Nutzereinrichtung für jede lokale Anmeldung. Unter Linux
