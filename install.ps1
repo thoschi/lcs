@@ -285,10 +285,20 @@ function Write-ClientEnv {
    $requireLocalUsername = Read-EnvValue $ClientEnv 'LCS_USE_DOMAIN_USERNAME'
    $passwordUsername = Read-EnvValue $ClientEnv 'LCS_PASSWORD_USERNAME'
    $defaultPassword = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
+   if (-not $passwordUsername) {
+      $passwordUsername = Read-Host 'Lokaler Benutzer [nutzer]'
+      if (-not $passwordUsername) { $passwordUsername = 'nutzer' }
+   }
+   if (-not $defaultPassword) {
+      $credential = Get-Credential -UserName $passwordUsername -Message 'Standardpasswort für das lokale Benutzerkonto'
+      if (-not $credential) { throw 'Standardpasswort fehlt.' }
+      $defaultPassword = $credential.GetNetworkCredential().Password
+      if (-not $defaultPassword) { $defaultPassword = 'corvi' }
+   }
    $lines = @(
       "LCS_SERVER=$ServerUrl", 'LCS_HEARTBEAT_SECONDS=20', 'LCS_POLL_SECONDS=10',
       "LCS_STATE_ROOT=$StateRoot", "LCS_FEATURE_ROOT=$FeatureRoot", "LCS_TOKEN_FILE=$EnrollmentToken", 'LCS_CHANNEL=stable',
-      "LCS_DEFAULT_PASSWORD=$(if ($defaultPassword) { $defaultPassword } else { 'corvi' })"
+      "LCS_DEFAULT_PASSWORD=$defaultPassword"
    )
    if ($proxy) { $lines += "LCS_PROXY=$proxy" }
    if ($ca) { $lines += "LCS_CA_FILE=$ca" }
@@ -301,15 +311,18 @@ function Write-ClientEnv {
 function Install-SystemService {
    Require-ServerUrl
    Stop-WindowsService 'LCSService' | Out-Null
-   if ($Operation -ne 'upgrade') { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ServiceRoot }
+   if ($Operation -ne 'upgrade') {
+      New-Item -ItemType Directory -Force -Path $ServiceRoot | Out-Null
+      Clear-Runtime $ServiceRoot @('client.env')
+   }
    New-Item -ItemType Directory -Force -Path $ServiceRoot, $StateRoot, $FeatureRoot | Out-Null
    Clear-Runtime $ServiceRoot @('features', 'state', 'venv', 'client.env', 'enrollment.token')
    Copy-Tree (Join-Path $SourceRoot 'system') $ServiceRoot
    Remove-Item -Recurse -Force -ErrorAction SilentlyContinue (Join-Path $ServiceRoot 'linux')
    $python = New-Venv $ServiceRoot
    Install-PyWin32 $python
-   if (($Operation -ne 'upgrade') -or -not (Test-Path $ClientEnv)) { Write-ClientEnv }
    Ensure-EnrollmentToken
+   Write-ClientEnv
    $serviceScript = Join-Path $ServiceRoot 'windows\windows_service.py'
    Install-WindowsService 'LCSService' $python $serviceScript 'LCS-Systemdienst konnte nicht installiert oder aktualisiert werden.'
    & $python $serviceScript start
@@ -331,7 +344,7 @@ function Install-UserClient {
    $python = New-Venv $ClientRoot
    & $python -m pip install --quiet -r (Join-Path $ClientRoot 'requirements.txt')
    if ($LASTEXITCODE) { throw 'Abhängigkeiten des LCS-User-Clients konnten nicht installiert werden.' }
-   if (($Operation -ne 'upgrade') -or -not (Test-Path $ClientEnv)) { Write-ClientEnv }
+   Write-ClientEnv
    $pythonw = Join-Path $ClientRoot 'venv\Scripts\pythonw.exe'
    $script = Join-Path $ClientRoot 'user_client.py'
    $icon = Join-Path $ClientRoot 'lcs-userclient.ico'
@@ -364,8 +377,8 @@ function Remove-UserClientIntegration {
 function Reset-LocalLogin {
    $username = Read-EnvValue $ClientEnv 'LCS_PASSWORD_USERNAME'
    $password = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
-   if (-not $username) { $username = 'nutzer' }
-   if (-not $password) { $password = 'corvi' }
+   if (-not $username) { throw "LCS_PASSWORD_USERNAME fehlt in $ClientEnv" }
+   if (-not $password) { throw "LCS_DEFAULT_PASSWORD fehlt in $ClientEnv" }
 
    & net.exe user $username $password | Out-Null
    if ($LASTEXITCODE) { throw "Standardpasswort für den lokalen Benutzer $username konnte nicht gesetzt werden." }

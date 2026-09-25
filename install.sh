@@ -418,6 +418,15 @@ write_client_env() {
    require_local_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_USE_DOMAIN_USERNAME)"
    password_username="$(read_env_value "$LCS_CLIENT_ENV" LCS_PASSWORD_USERNAME)"
    default_password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
+   if [ -z "$password_username" ]; then
+      read -r -p "Lokaler Benutzer [nutzer]: " password_username </dev/tty
+      password_username="${password_username:-nutzer}"
+   fi
+   if [ -z "$default_password" ]; then
+      read -r -s -p "Standardpasswort für $password_username [corvi]: " default_password </dev/tty
+      echo
+      default_password="${default_password:-corvi}"
+   fi
    if [ -z "$proxy" ]; then
       proxy="$(read_env_value /etc/lcs/client.env LCS_PROXY)"
       [ -z "$proxy" ] && proxy="$(read_env_value /etc/lmn-client/client.env LMN_PROXY)"
@@ -435,7 +444,7 @@ LCS_STATE_ROOT=$LCS_STATE_ROOT
 LCS_FEATURE_ROOT=$LCS_FEATURE_ROOT
 LCS_TOKEN_FILE=$LCS_ENROLLMENT_TOKEN
 LCS_CHANNEL=stable
-LCS_DEFAULT_PASSWORD=${default_password:-corvi}
+LCS_DEFAULT_PASSWORD=$default_password
 EOF2
    [ -n "$proxy" ] && printf 'LCS_PROXY=%s\n' "$proxy" >> "$LCS_CLIENT_ENV"
    [ -n "$ca" ] && printf 'LCS_CA_FILE=%s\n' "$ca" >> "$LCS_CLIENT_ENV"
@@ -447,8 +456,13 @@ EOF2
 }
 
 install_service() {
-   [ "$OPERATION" = upgrade ] || rm -rf "$LCS_SERVICE_ROOT" /etc/lcs /var/lib/lcs
    ensure_server_url
+
+   if [ "$OPERATION" != upgrade ]; then
+      mkdir -p "$LCS_SERVICE_ROOT"
+      find "$LCS_SERVICE_ROOT" -mindepth 1 -maxdepth 1 ! -name client.env -exec rm -rf {} +
+      rm -rf /etc/lcs /var/lib/lcs
+   fi
 
    systemctl stop lcs-service.service 2>/dev/null || true
    systemctl disable --now lmn-agent.service 2>/dev/null || true
@@ -463,8 +477,8 @@ install_service() {
    rm -rf "$LCS_SERVICE_ROOT/linux" "$LCS_SERVICE_ROOT/venv"
    [ -d "$LCS_SERVICE_ROOT/venv" ] || python3 -m venv "$LCS_SERVICE_ROOT/venv"
 
-   if [ "$OPERATION" != upgrade ] || [ ! -f "$LCS_CLIENT_ENV" ]; then write_client_env; fi
    ensure_enrollment_token
+   write_client_env
 
    mkdir -p "$LCS_SYSTEMD_ROOT"
    render_template "$SOURCE_ROOT/system/linux/lcs-service.service.in" "$LCS_SYSTEMD_ROOT/lcs-service.service"
@@ -496,7 +510,7 @@ install_client() {
       echo "Hinweis: python3-tk fehlt. Vor dem Imaging installieren: apt install python3-tk" >&2
    fi
 
-   if [ "$OPERATION" != upgrade ] || [ ! -f "$LCS_CLIENT_ENV" ]; then write_client_env; fi
+   write_client_env
 
    # Nur der minimale Einrichtungsdienst startet bei der Anmeldung.
    render_template "$SOURCE_ROOT/client/linux/lcs-userservice.desktop.in" "$LCS_AUTOSTART_ROOT/lcs-userservice.desktop"
@@ -523,8 +537,8 @@ reset_local_login() {
    local username password
    username="$(read_env_value "$LCS_CLIENT_ENV" LCS_PASSWORD_USERNAME)"
    password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
-   username="${username:-nutzer}"
-   password="${password:-corvi}"
+   [ -n "$username" ] || { echo "LCS_PASSWORD_USERNAME fehlt in $LCS_CLIENT_ENV" >&2; return 1; }
+   [ -n "$password" ] || { echo "LCS_DEFAULT_PASSWORD fehlt in $LCS_CLIENT_ENV" >&2; return 1; }
    id "$username" >/dev/null 2>&1 || { echo "Lokaler Benutzer nicht gefunden: $username" >&2; return 1; }
    printf '%s:%s\n' "$username" "$password" | chpasswd
 
