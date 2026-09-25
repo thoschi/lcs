@@ -229,7 +229,8 @@ def handle_user_request(config, runtime, request, peer_username=''):
          status = initialization_status(config, domain_username)
          runtime['initialization_status'] = status
       else:
-         status = runtime.get('initialization_status') or initialization_status(config)
+         status = initialization_status(config)
+         runtime['initialization_status'] = status
       # Eine ausstehende Geräteregistrierung darf die lokale Einrichtung nicht
       # verstecken. Nur ein sicher erkannter Musterclient wird ausgenommen.
       if runtime.get('image_source'):
