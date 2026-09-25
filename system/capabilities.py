@@ -47,14 +47,14 @@ def execute(capability_id, username='', parameters=None):
       command = ['shutdown', '/r', '/t', '0'] if os.name == 'nt' else ['systemctl', 'reboot']
    elif os.name == 'nt':
       # The service runs as SYSTEM. logoff.exe therefore needs the interactive session id.
-      output = subprocess.check_output(['query', 'user'], text=True, errors='replace', timeout=5)
+      import win32ts
       session_id = ''
-      for line in output.splitlines()[1:]:
-         columns = line.replace('>', ' ').split()
-         if columns and (not username or columns[0].lower() == username.lower()):
-            session_id = next((value for value in columns[1:] if value.isdigit()), '')
-            if session_id:
-               break
+      for session in win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 0, 1):
+         session_user = win32ts.WTSQuerySessionInformation(
+            win32ts.WTS_CURRENT_SERVER_HANDLE, session['SessionId'], win32ts.WTSUserName)
+         if session_user and (not username or session_user.lower() == username.lower()):
+            session_id = str(session['SessionId'])
+            break
       if not session_id:
          raise RuntimeError('Keine angemeldete Benutzersitzung gefunden.')
       command = ['logoff', session_id]
