@@ -171,6 +171,7 @@ def initialize_user(config, username='', password='', force=False, client_userna
          return {'ok': True, 'username': client_username}
       if not client_username:
          return {'ok': False, 'error': 'Domänenbenutzer konnte nicht ermittelt werden.'}
+      disable_autologin()
       save_json(profile_path, {'username': client_username}, 0o600)
       log('Domänenbenutzereinrichtung abgeschlossen', username=client_username)
       return {'ok': True, 'username': client_username}
@@ -226,7 +227,9 @@ def handle_user_request(config, runtime, request, peer_username=''):
          runtime['initialization_status'] = status
       else:
          status = runtime.get('initialization_status') or initialization_status(config)
-      if runtime.get('image_source') or not runtime.get('role_resolved'):
+      # Eine ausstehende Geräteregistrierung darf die lokale Einrichtung nicht
+      # verstecken. Nur ein sicher erkannter Musterclient wird ausgenommen.
+      if runtime.get('image_source'):
          status = dict(status)
          status['initialization_required'] = False
       if status.get('domain_username'):
@@ -760,14 +763,8 @@ def run_forever(env_path=None, stop_requested=None):
             time.sleep(3)
             continue
 
-      # Erst die Registrierung unterscheidet Musterclient und normalen Client.
-      # Nur normale Clients benötigen anschließend die lokale Nutzereinrichtung.
-      if (not state.get('image_source') and
-            user_runtime.get('initialization_status', {}).get('initialization_required')):
-         user_runtime['ready'] = False
-         time.sleep(1)
-         continue
-
+      # Registrierung, Serverkommunikation und lokale Nutzereinrichtung laufen
+      # unabhängig. Die IPC-Verarbeitung erfolgt parallel im Benutzer-Thread.
       user_runtime['ready'] = True
 
       if state.get('image_source'):
