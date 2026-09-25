@@ -49,7 +49,7 @@ def execute(capability_id, username='', parameters=None):
       # The service runs as SYSTEM. logoff.exe therefore needs the interactive session id.
       import win32ts
       session_id = ''
-      for session in win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 0, 1):
+      for session in win32ts.WTSEnumerateSessions(win32ts.WTS_CURRENT_SERVER_HANDLE, 1, 0):
          session_user = win32ts.WTSQuerySessionInformation(
             win32ts.WTS_CURRENT_SERVER_HANDLE, session['SessionId'], win32ts.WTSUserName)
          if session_user and (not username or session_user.lower() == username.lower()):
