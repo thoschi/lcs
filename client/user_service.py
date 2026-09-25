@@ -33,8 +33,8 @@ def run_once(config):
    if status.get('profile_exists') and not status.get('password_required'):
       result = request(config, 'initialize')
       if result.get('ok'):
-         request(config, 'execute', capability_id='logout')
-         return 0
+         result = request(config, 'execute', capability_id='logout')
+         return 0 if result.get('ok') else 1
    root = tk.Tk()
    existing = status.get('profile_exists')
    domain_user = status.get('domain_username')
