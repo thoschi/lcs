@@ -97,6 +97,8 @@ Shadow-Zeile und Autologin-Konfiguration bleiben in diesem Modus unverändert.
 Server, Systemdienst und Benutzerprogramme werden mit `install server`,
 `install service` beziehungsweise `install client` einzeln installiert. Ein
 Upgrade erfolgt entsprechend mit `upgrade` statt `install`.
+Bei Installation und Upgrade ergänzt der Installer fehlende Angaben zum lokalen
+Benutzer und dessen Standardpasswort interaktiv in der Client-Konfiguration.
 `reset-identity` stellt außerdem für den konfigurierten lokalen Benutzer das
 Standardpasswort wieder her und aktiviert unter Windows und Linux den Autologin.
 Unter Windows startet die Nutzereinrichtung über den systemweiten `Run`-Eintrag

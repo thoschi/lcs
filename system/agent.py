@@ -57,7 +57,7 @@ def runtime_paths(config):
 
 
 def user_data_path(config, username=''):
-   local_username = username or config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+   local_username = username or config['LCS_PASSWORD_USERNAME'].strip()
    default = (str(Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username / 'AppData' / 'Roaming' / 'LCS')
               if os.name == 'nt' else '/home/%s/.config/lcs' % local_username)
    configured = config.get('LCS_USER_DATA', default)
@@ -176,7 +176,7 @@ def initialize_user(config, username='', password='', force=False, client_userna
       save_json(profile_path, {'username': client_username}, 0o600)
       log('Domänenbenutzereinrichtung abgeschlossen', username=client_username)
       return {'ok': True, 'username': client_username}
-   local_username = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+   local_username = config['LCS_PASSWORD_USERNAME'].strip()
    status = initialization_status(config, client_username)
    profile = load_json(profile_path, {})
    log('Benutzereinrichtung geprüft', initialization_required=status['initialization_required'],
@@ -249,7 +249,7 @@ def handle_user_request(config, runtime, request, peer_username=''):
       if not cap:
          return {'ok': False, 'error': 'Aktion ist nicht für Benutzer freigegeben.'}
       local_username = (domain_username if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else
-                        config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer')
+                        config['LCS_PASSWORD_USERNAME'].strip())
       result = execute_capability(cap_id, local_username)
       return {'ok': True, 'result': result}
    if operation == 'initialize':
@@ -346,9 +346,9 @@ def serve_user_client(config, runtime):
                   _pid, uid, _gid = struct.unpack('3i', connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
                   import pwd
                   peer_username = pwd.getpwuid(uid).pw_name
-                  allowed_user = config.get('LCS_PASSWORD_USERNAME', 'nutzer').strip() or 'nutzer'
+                  allowed_user = config['LCS_PASSWORD_USERNAME'].strip()
                   if (not env_bool(config, 'LCS_USE_DOMAIN_USERNAME') and
-                        uid not in (0, pwd.getpwnam(allowed_user).pw_uid)):
+                        uid != 0 and peer_username != allowed_user):
                      raise PermissionError('Zugriff auf den LCS-Systemdienst verweigert.')
                raw = b''
                while b'\n' not in raw and len(raw) < 1024 * 1024:
@@ -719,6 +719,11 @@ def run_forever(env_path=None, stop_requested=None):
       os.environ['HTTPS_PROXY'] = proxy
    if not config.get('LCS_SERVER'):
       raise RuntimeError('LCS_SERVER missing in %s' % env_path)
+   missing = [key for key in ('LCS_PASSWORD_USERNAME', 'LCS_DEFAULT_PASSWORD')
+              if not config.get(key, '').strip()]
+   if missing:
+      raise RuntimeError('Erforderliche Einträge fehlen in %s: %s' %
+                         (env_path, ', '.join(missing)))
    log('Dienst gestartet', config=str(env_path), server=config['LCS_SERVER'])
    config.setdefault('LCS_FEATURE_ROOT', paths['feature_root'])
    heartbeat_interval = int(config.get('LCS_HEARTBEAT_SECONDS', '20'))
