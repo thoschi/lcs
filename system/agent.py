@@ -408,22 +408,6 @@ def save_state(state_dir, state):
    }, 0o644)
 
 
-def save_server_settings(env_path, settings):
-   allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME',
-              'LCS_TEMPLATE_HOSTNAME', 'LCS_TOKEN_CHECKSUM')
-   path = Path(env_path)
-   try:
-      lines = path.read_text(encoding='utf-8').splitlines()
-   except FileNotFoundError:
-      lines = []
-   lines = [line for line in lines if not any(line.startswith(key + '=') for key in allowed)]
-   for key in allowed:
-      value = str(settings.get(key, '')).replace('\r', '').replace('\n', '')
-      if value:
-         lines.append(key + '=' + value)
-   path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
-
-
 def read_enrollment_token(config):
    token_path = Path(runtime_paths(config)['token'])
    try:
@@ -452,12 +436,6 @@ def enroll(config, state_dir):
    log('Registrierungsantwort empfangen', status=status)
    if status != 200:
       raise RuntimeError('Enrollment failed: %s' % response)
-   if not response.get('image_source'):
-      save_server_settings(runtime_paths(config)['env'], response.get('settings', {}))
-      log('Servereinstellungen gespeichert', keys=sorted(response.get('settings', {}).keys()))
-      for key in ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME'):
-         if response.get('settings', {}).get(key):
-            config[key] = str(response['settings'][key])
    registered_hostname = str(response.get('hostname') or current_hostname)
    restart_required = False
    if registered_hostname.lower() != current_hostname.lower():
