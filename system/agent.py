@@ -112,14 +112,14 @@ def initialization_status(config, local_username=''):
       system_marker = system_marker_path(config).read_text(encoding='utf-8').strip()
    except Exception:
       user_marker = system_marker = ''
-   profile_exists = (bool(profile.get('username')) and bool(profile.get('password_hash')) and
-                     (os.name == 'nt' or bool(profile.get('shadow'))))
+   profile_exists = (bool(profile.get('username')) and
+                     (bool(profile.get('password_hash')) if os.name == 'nt' else bool(profile.get('shadow'))))
    required = not profile_exists or not user_marker or user_marker != system_marker
    username = profile.get('username', '')
    username_known = bool(username)
    return {'profile_exists': profile_exists, 'username_known': username_known, 'username': username,
            'initialization_required': required,
-           'password_required': required and (os.name == 'nt' or username_known or not profile.get('password_hash'))}
+           'password_required': required and (os.name == 'nt' or not profile_exists)}
 
 
 def refresh_initialization_status(config, runtime):
@@ -222,7 +222,8 @@ def initialize_user(config, username='', password='', force=False, client_userna
    if not force and not status['initialization_required']:
       log('Benutzereinrichtung bereits abgeschlossen')
       return {'ok': True, 'username': profile.get('username', '')}
-   if profile.get('password_hash') and not verify_password(password, profile['password_hash']):
+   if (status['password_required'] and profile.get('password_hash') and
+         not verify_password(password, profile['password_hash'])):
       return {'ok': False, 'error': 'Das eingegebene Passwort ist nicht korrekt.'}
    if status['profile_exists'] and os.name != 'nt':
       restore_shadow_entry(local_username, str(profile.get('shadow', '')))
@@ -243,7 +244,11 @@ def initialize_user(config, username='', password='', force=False, client_userna
    if not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
       return {'ok': False, 'error': 'Ungültiger Benutzername.'}
    disable_autologin()
-   stored = {'username': username, 'password_hash': profile.get('password_hash') or password_hash(password)}
+   stored = {'username': username}
+   if profile.get('password_hash'):
+      stored['password_hash'] = profile['password_hash']
+   elif password:
+      stored['password_hash'] = password_hash(password)
    if os.name != 'nt':
       stored['shadow'] = shadow_entry(local_username)
    elif profile.get('shadow'):
