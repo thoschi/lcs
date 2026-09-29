@@ -1,4 +1,6 @@
 import json
+import hashlib
+import hmac
 import os
 import platform
 import re
@@ -69,6 +71,23 @@ def user_profile_path(config, path_username=''):
    return user_data_path(config, path_username) / 'credentials.json'
 
 
+def password_hash(password, salt=None):
+   salt = salt or os.urandom(16)
+   digest = hashlib.scrypt(password.encode('utf-8'), salt=salt, n=2**14, r=8, p=1,
+                           dklen=32, maxmem=128 * 1024 * 1024)
+   return 'scrypt$%s$%s' % (salt.hex(), digest.hex())
+
+
+def verify_password(password, stored):
+   try:
+      _, salt, expected = stored.split('$', 2)
+      actual = hashlib.scrypt(password.encode('utf-8'), salt=bytes.fromhex(salt),
+                              n=2**14, r=8, p=1, dklen=32, maxmem=128 * 1024 * 1024)
+      return hmac.compare_digest(actual, bytes.fromhex(expected))
+   except Exception:
+      return False
+
+
 def system_marker_path(config):
    default = (str(Path(os.environ.get('PROGRAMDATA', r'C:\ProgramData')) / 'LCS' / 'system-initialized')
               if os.name == 'nt' else '/var/lib/lcs/system-initialized')
@@ -83,23 +102,24 @@ def user_marker_path(config, path_username=''):
 def initialization_status(config, local_username=''):
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       profile = load_json(user_profile_path(config, local_username), {})
-      profile_exists = profile.get('username') == local_username
+      profile_exists = profile.get('username') == local_username and bool(profile.get('password_hash'))
       return {'profile_exists': profile_exists, 'username': local_username,
               'initialization_required': not profile_exists,
-              'password_required': False, 'domain_username': True}
+              'password_required': not profile_exists, 'domain_username': True}
    profile = load_json(user_profile_path(config, local_username), {})
    try:
       user_marker = user_marker_path(config, local_username).read_text(encoding='utf-8').strip()
       system_marker = system_marker_path(config).read_text(encoding='utf-8').strip()
    except Exception:
       user_marker = system_marker = ''
-   profile_exists = bool(profile.get('username')) and (os.name == 'nt' or bool(profile.get('shadow')))
+   profile_exists = (bool(profile.get('username')) and bool(profile.get('password_hash')) and
+                     (os.name == 'nt' or bool(profile.get('shadow'))))
    required = not profile_exists or not user_marker or user_marker != system_marker
    username = profile.get('username', '')
    username_known = bool(username)
    return {'profile_exists': profile_exists, 'username_known': username_known, 'username': username,
            'initialization_required': required,
-           'password_required': required and (os.name == 'nt' or username_known and not profile_exists)}
+           'password_required': required and (os.name == 'nt' or username_known or not profile.get('password_hash'))}
 
 
 def refresh_initialization_status(config, runtime):
@@ -184,8 +204,14 @@ def initialize_user(config, username='', password='', force=False, client_userna
          return {'ok': True, 'username': client_username}
       if not client_username:
          return {'ok': False, 'error': 'Domänenbenutzer konnte nicht ermittelt werden.'}
+      profile = load_json(profile_path, {})
+      if not password:
+         return {'ok': False, 'error': 'Passwort ist erforderlich.'}
+      if profile.get('password_hash') and not verify_password(password, profile['password_hash']):
+         return {'ok': False, 'error': 'Das eingegebene Passwort ist nicht korrekt.'}
       disable_autologin()
-      save_json(profile_path, {'username': client_username}, 0o600)
+      save_json(profile_path, {'username': client_username,
+                               'password_hash': profile.get('password_hash') or password_hash(password)}, 0o600)
       log('Domänenbenutzereinrichtung abgeschlossen', username=client_username)
       return {'ok': True, 'username': client_username}
    local_username = config['LCS_PASSWORD_USERNAME'].strip()
@@ -196,6 +222,8 @@ def initialize_user(config, username='', password='', force=False, client_userna
    if not force and not status['initialization_required']:
       log('Benutzereinrichtung bereits abgeschlossen')
       return {'ok': True, 'username': profile.get('username', '')}
+   if profile.get('password_hash') and not verify_password(password, profile['password_hash']):
+      return {'ok': False, 'error': 'Das eingegebene Passwort ist nicht korrekt.'}
    if status['profile_exists'] and os.name != 'nt':
       restore_shadow_entry(local_username, str(profile.get('shadow', '')))
    elif not password or (not status['profile_exists'] and not username):
@@ -215,7 +243,7 @@ def initialize_user(config, username='', password='', force=False, client_userna
    if not re.fullmatch(r'[A-Za-z0-9_.@-]+', username):
       return {'ok': False, 'error': 'Ungültiger Benutzername.'}
    disable_autologin()
-   stored = {'username': username}
+   stored = {'username': username, 'password_hash': profile.get('password_hash') or password_hash(password)}
    if os.name != 'nt':
       stored['shadow'] = shadow_entry(local_username)
    elif profile.get('shadow'):
@@ -228,6 +256,26 @@ def initialize_user(config, username='', password='', force=False, client_userna
    system_marker.write_text(marker + '\n', encoding='utf-8')
    log('Benutzereinrichtung abgeschlossen', username=username, local_username=local_username)
    return {'ok': True, 'username': username}
+
+
+def change_user_password(config, old_password, new_password, client_username=''):
+   profile_path = user_profile_path(config, client_username)
+   profile = load_json(profile_path, {})
+   if not profile.get('password_hash') or not verify_password(old_password, profile['password_hash']):
+      return {'ok': False, 'error': 'Das alte Passwort ist nicht korrekt.'}
+   if not new_password:
+      return {'ok': False, 'error': 'Das neue Passwort darf nicht leer sein.'}
+   local_username = config['LCS_PASSWORD_USERNAME'].strip()
+   command = ['net', 'user', local_username, new_password] if os.name == 'nt' else ['chpasswd']
+   result = subprocess.run(command, input=None if os.name == 'nt' else local_username + ':' + new_password,
+                           text=True, capture_output=True)
+   if result.returncode:
+      return {'ok': False, 'error': result.stderr.strip() or result.stdout.strip() or 'Passwort konnte nicht geändert werden.'}
+   profile['password_hash'] = password_hash(new_password)
+   if os.name != 'nt':
+      profile['shadow'] = shadow_entry(local_username)
+   save_json(profile_path, profile, 0o600)
+   return {'ok': True}
 
 
 def user_capabilities(stack):
@@ -270,6 +318,11 @@ def handle_user_request(config, runtime, request, peer_username=''):
                                str(request.get('password', '')), client_username=profile_username)
       runtime['initialization_status'] = initialization_status(config, profile_username)
       return result
+   if operation == 'change_password':
+      if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
+         return {'ok': False, 'error': 'Domänenpasswörter können hier nicht geändert werden.'}
+      return change_user_password(config, str(request.get('old_password', '')),
+                                  str(request.get('new_password', '')), profile_username)
    return {'ok': False, 'error': 'Unbekannte Anfrage.'}
 
 
@@ -706,9 +759,10 @@ def run_forever(env_path=None, stop_requested=None):
       os.environ['HTTPS_PROXY'] = proxy
    if not config.get('LCS_SERVER'):
       raise RuntimeError('LCS_SERVER missing in %s' % env_path)
+   user_enabled = env_bool(config, 'LCS_USER_ENABLED', True)
    missing = [key for key in ('LCS_PASSWORD_USERNAME', 'LCS_DEFAULT_PASSWORD')
               if not config.get(key, '').strip()]
-   if missing:
+   if user_enabled and missing:
       raise RuntimeError('Erforderliche Einträge fehlen in %s: %s' %
                          (env_path, ', '.join(missing)))
    log('Dienst gestartet', config=str(env_path), server=config['LCS_SERVER'])
@@ -738,14 +792,16 @@ def run_forever(env_path=None, stop_requested=None):
                    'ready': False}
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       user_runtime['initialization_status'] = {'initialization_required': True}
-   refresh_initialization_status(config, user_runtime)
-   threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
+   if user_enabled:
+      refresh_initialization_status(config, user_runtime)
+      threading.Thread(target=serve_user_client, args=(config, user_runtime), daemon=True).start()
    last_heartbeat = 0
    last_poll = 0
    inventory = {}
 
    while True:
-      refresh_initialization_status(config, user_runtime)
+      if user_enabled:
+         refresh_initialization_status(config, user_runtime)
       now = time.time()
       if stop_requested and stop_requested():
          log('Dienststopp angefordert')

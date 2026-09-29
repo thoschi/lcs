@@ -90,14 +90,27 @@ def run_once(config):
    tk.Label(frame, text='Schulnetz-Passwort').grid(row=password_row, column=0, sticky='w', pady=4)
    password = tk.Entry(frame, width=32, show='*')
    password.grid(row=password_row, column=1, pady=4)
+   confirmation = None
+   if not existing:
+      tk.Label(frame, text='Passwort wiederholen').grid(row=3, column=0, sticky='w', pady=4)
+      confirmation = tk.Entry(frame, width=32, show='*')
+      confirmation.grid(row=3, column=1, pady=4)
    if username_known or domain_user:
       username.insert(0, status.get('username', ''))
       username.configure(state='readonly')
 
    def submit():
+      if confirmation is not None and password.get() != confirmation.get():
+         messagebox.showerror(root.title(), 'Die Passwörter stimmen nicht überein.')
+         password.delete(0, tk.END)
+         confirmation.delete(0, tk.END)
+         password.focus_set()
+         return
       debug('Initialisierung aus dem Dialog wird angefordert', username_entered=bool(username.get().strip()))
       result = request(config, 'initialize', username=username.get().strip(), password=password.get())
       password.delete(0, tk.END)
+      if confirmation is not None:
+         confirmation.delete(0, tk.END)
       if not result.get('ok'):
          messagebox.showerror(root.title(), result.get('error', 'Einrichtung fehlgeschlagen.'))
          return
@@ -112,7 +125,7 @@ def run_once(config):
 
    button_text = 'LCS einrichten' if domain_user else 'Lokales Konto einrichten'
    button = tk.Button(frame, text=button_text, command=submit)
-   button.grid(row=password_row + 1, column=0, columnspan=2, sticky='e', pady=(14, 0))
+   button.grid(row=password_row + (2 if confirmation is not None else 1), column=0, columnspan=2, sticky='e', pady=(14, 0))
    password.bind('<Return>', lambda _event: submit())
    root.protocol('WM_DELETE_WINDOW', root.iconify)
    root.mainloop()
