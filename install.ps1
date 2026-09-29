@@ -6,8 +6,8 @@ param(
    [string]$ServerUrl,
    [Alias('token-file')]
    [string]$TokenFile,
-   [Alias('no-userclient')]
-   [switch]$NoUserClient,
+   [Alias('no-user')]
+   [switch]$NoUser,
    [Parameter(ValueFromRemainingArguments = $true)]
    [string[]]$InstallerArgs
 )
@@ -43,8 +43,8 @@ Aufruf:
   .\install.ps1 upgrade server
   .\install.ps1 install service https://clients.example --token-file C:\Pfad\token.txt
   .\install.ps1 install client https://clients.example
-  .\install.ps1 install workstation https://clients.example --token-file C:\Pfad\token.txt [--no-userclient]
-  .\install.ps1 upgrade workstation [https://clients.example] [--no-userclient]
+  .\install.ps1 install workstation https://clients.example --token-file C:\Pfad\token.txt [--no-user]
+  .\install.ps1 upgrade workstation [https://clients.example] [--no-user]
   .\install.ps1 install all https://clients.example
   .\install.ps1 uninstall [server|service|client|workstation|all]
   .\install.ps1 diagnose service
@@ -70,7 +70,7 @@ for ($index = 0; $index -lt $InstallerArgs.Count; $index++) {
          if ($index -ge $InstallerArgs.Count) { throw '--token-file benötigt eine Datei.' }
          $TokenSource = $InstallerArgs[$index]
       }
-      '--no-userclient' { $NoUserClient = $true }
+      '--no-user' { $NoUser = $true }
       default { Write-Error "Unbekannte Option: $($InstallerArgs[$index])"; Show-Usage; exit 2 }
    }
 }
@@ -291,11 +291,11 @@ function Write-ClientEnv {
    $templateHostname = Read-EnvValue $ClientEnv 'LCS_TEMPLATE_HOSTNAME'
    $tokenChecksum = Read-EnvValue $ClientEnv 'LCS_TOKEN_CHECKSUM'
    $defaultPassword = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
-   if (-not $passwordUsername) {
+   if (-not $NoUser -and -not $passwordUsername) {
       $passwordUsername = Read-Host 'Lokaler Benutzer [nutzer]'
       if (-not $passwordUsername) { $passwordUsername = 'nutzer' }
    }
-   if (-not $defaultPassword) {
+   if (-not $NoUser -and -not $defaultPassword) {
       $credential = Get-Credential -UserName $passwordUsername -Message 'Standardpasswort für das lokale Benutzerkonto'
       if (-not $credential) { throw 'Standardpasswort fehlt.' }
       $defaultPassword = $credential.GetNetworkCredential().Password
@@ -304,8 +304,9 @@ function Write-ClientEnv {
    $lines = @(
       "LCS_SERVER=$ServerUrl", 'LCS_HEARTBEAT_SECONDS=20', 'LCS_POLL_SECONDS=10',
       "LCS_STATE_ROOT=$StateRoot", "LCS_FEATURE_ROOT=$FeatureRoot", "LCS_TOKEN_FILE=$EnrollmentToken", 'LCS_CHANNEL=stable',
-      "LCS_DEFAULT_PASSWORD=$defaultPassword"
+      ('LCS_USER_ENABLED=' + $(if ($NoUser) { 'false' } else { 'true' }))
    )
+   if ($defaultPassword) { $lines += "LCS_DEFAULT_PASSWORD=$defaultPassword" }
    if ($proxy) { $lines += "LCS_PROXY=$proxy" }
    if ($ca) { $lines += "LCS_CA_FILE=$ca" }
    if ($userData) { $lines += "LCS_USER_DATA=$userData" }
@@ -547,14 +548,14 @@ switch ($Mode.ToLowerInvariant()) {
    'client' { Install-UserClient }
    'workstation' {
       Install-SystemService
-      if ($NoUserClient) { Remove-UserClientIntegration; Write-Host 'LCS-User-Client wurde wegen --no-userclient nicht installiert.' }
+      if ($NoUser) { Remove-UserClientIntegration; Write-Host 'Wegen --no-user wurden weder Nutzerdienst noch User-Client installiert.' }
       else { Install-UserClient }
    }
    'all' {
       Require-ServerUrl
       Install-Server
       Install-SystemService
-      if ($NoUserClient) { Remove-UserClientIntegration; Write-Host 'LCS-User-Client wurde wegen --no-userclient nicht installiert.' }
+      if ($NoUser) { Remove-UserClientIntegration; Write-Host 'Wegen --no-user wurden weder Nutzerdienst noch User-Client installiert.' }
       else { Install-UserClient }
    }
    'reset-identity' { Reset-Identity }

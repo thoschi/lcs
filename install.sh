@@ -26,7 +26,7 @@ LCS_SERVER_USER="${LCS_SERVER_USER:-lcs}"
 LCS_SYSTEMD_ROOT="${LCS_SYSTEMD_ROOT:-/etc/systemd/system}"
 LCS_AUTOSTART_ROOT="${LCS_AUTOSTART_ROOT:-/etc/xdg/autostart}"
 LCS_APPLICATIONS_ROOT="${LCS_APPLICATIONS_ROOT:-/usr/share/applications}"
-NO_USERCLIENT=0
+NO_USER=0
 LCS_SERVER_ENV="${LCS_SERVER_ENV:-$LCS_SERVER_ROOT/server.env}"
 LCS_CLIENT_ENV="${LCS_CLIENT_ENV:-$LCS_SERVICE_ROOT/client.env}"
 LCS_ENROLLMENT_TOKEN="${LCS_ENROLLMENT_TOKEN:-$LCS_SERVICE_ROOT/enrollment.token}"
@@ -45,8 +45,8 @@ Aufruf:
   $0 upgrade server
   $0 service https://clients.example --token-file /pfad/zur/token-datei
   $0 client https://clients.example
-  $0 install workstation https://clients.example [--no-userclient]
-  $0 upgrade workstation [https://clients.example] [--no-userclient]
+  $0 install workstation https://clients.example [--no-user]
+  $0 upgrade workstation [https://clients.example] [--no-user]
   $0 uninstall [server|service|client|workstation|all]
   $0 all https://clients.example
   $0 reset-identity
@@ -65,8 +65,8 @@ reset-identity Geräteidentität löschen, Standardlogin wiederherstellen (Diens
 
 Optionen:
   --token-file DATEI   Enrollment-Token für einen frischen Systemdienst
-  --no-userclient      bei workstation/all nur den Systemdienst installieren;
-                       keinen grafischen User-Client installieren
+  --no-user            bei workstation/all ausschließlich den Systemdienst installieren;
+                       keine Nutzerdaten abfragen und keinen Nutzerdienst installieren
 
 Optionale Umgebung:
   LCS_PROXY=URL        Proxy für Installation und späteren Systemdienst
@@ -108,8 +108,8 @@ while [ $# -gt 0 ]; do
          TOKEN_SOURCE="$2"
          shift 2
          ;;
-      --no-userclient)
-         NO_USERCLIENT=1
+      --no-user)
+         NO_USER=1
          shift
          ;;
       *)
@@ -425,11 +425,11 @@ write_client_env() {
    template_hostname="$(read_env_value "$LCS_CLIENT_ENV" LCS_TEMPLATE_HOSTNAME)"
    token_checksum="$(read_env_value "$LCS_CLIENT_ENV" LCS_TOKEN_CHECKSUM)"
    default_password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
-   if [ -z "$password_username" ]; then
+   if [ "$NO_USER" -eq 0 ] && [ -z "$password_username" ]; then
       read -r -p "Lokaler Benutzer [nutzer]: " password_username </dev/tty
       password_username="${password_username:-nutzer}"
    fi
-   if [ -z "$default_password" ]; then
+   if [ "$NO_USER" -eq 0 ] && [ -z "$default_password" ]; then
       read -r -s -p "Standardpasswort für $password_username [corvi]: " default_password </dev/tty
       echo
       default_password="${default_password:-corvi}"
@@ -451,8 +451,9 @@ LCS_STATE_ROOT=$LCS_STATE_ROOT
 LCS_FEATURE_ROOT=$LCS_FEATURE_ROOT
 LCS_TOKEN_FILE=$LCS_ENROLLMENT_TOKEN
 LCS_CHANNEL=stable
-LCS_DEFAULT_PASSWORD=$default_password
+LCS_USER_ENABLED=$([ "$NO_USER" -eq 0 ] && echo true || echo false)
 EOF2
+   [ -n "$default_password" ] && printf 'LCS_DEFAULT_PASSWORD=%s\n' "$default_password" >> "$LCS_CLIENT_ENV"
    [ -n "$proxy" ] && printf 'LCS_PROXY=%s\n' "$proxy" >> "$LCS_CLIENT_ENV"
    [ -n "$ca" ] && printf 'LCS_CA_FILE=%s\n' "$ca" >> "$LCS_CLIENT_ENV"
    [ -n "$user_data" ] && printf 'LCS_USER_DATA=%s\n' "$user_data" >> "$LCS_CLIENT_ENV"
@@ -729,9 +730,9 @@ case "$MODE" in
       ;;
    workstation)
       install_service
-      if [ "$NO_USERCLIENT" -eq 1 ]; then
+      if [ "$NO_USER" -eq 1 ]; then
          remove_client_integration
-         echo "LCS-User-Client wurde wegen --no-userclient nicht installiert."
+         echo "Wegen --no-user wurden weder Nutzerdienst noch User-Client installiert."
       else
          install_client
       fi
@@ -740,9 +741,9 @@ case "$MODE" in
       ensure_server_url
       install_server
       install_service
-      if [ "$NO_USERCLIENT" -eq 1 ]; then
+      if [ "$NO_USER" -eq 1 ]; then
          remove_client_integration
-         echo "LCS-User-Client wurde wegen --no-userclient nicht installiert."
+         echo "Wegen --no-user wurden weder Nutzerdienst noch User-Client installiert."
       else
          install_client
       fi

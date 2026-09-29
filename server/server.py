@@ -531,6 +531,31 @@ def create_token():
    return render_admin(new_token=checksum, page='tokens')
 
 
+@app.post('/admin/token/<int:token_id>/edit')
+@admin_required
+def edit_token(token_id):
+   check_csrf()
+   try:
+      settings = core.enrollment_settings(
+         request.form.get('user_data', ''), request.form.get('use_domain_username') == '1',
+         request.form.get('password_username', ''))
+      name = request.form.get('name', '').strip()
+      hostname = request.form.get('hostname', '').strip()
+      if not name:
+         raise ValueError('Name fehlt')
+      if '\n' in hostname or '\r' in hostname:
+         raise ValueError('Hostname darf keinen Zeilenumbruch enthalten')
+      with core.db() as conn:
+         if not conn.execute('SELECT 1 FROM enrollment_tokens WHERE id=?', (token_id,)).fetchone():
+            abort(404)
+         conn.execute('UPDATE enrollment_tokens SET name=?, hostname=?, settings_json=? WHERE id=?',
+                      (name, hostname, json.dumps(settings, ensure_ascii=False), token_id))
+      flash('Token-Informationen gespeichert.', 'success')
+   except Exception as exc:
+      flash(str(exc), 'error')
+   return redirect(url_for('admin_tokens') + '#tokens')
+
+
 @app.post('/admin/token/<int:token_id>/toggle')
 @admin_required
 def toggle_token(token_id):

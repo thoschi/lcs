@@ -84,7 +84,8 @@ einen Musterclient handelt. Nur auf normalen Clients wird danach die
 Nutzereinrichtung ausgeführt. Ein unter Linux vorhandenes Profil wird dabei
 lokal wiederhergestellt, andernfalls fragt die Nutzereinrichtung bei der
 Anmeldung die Zugangsdaten ab.
-`--no-userclient` installiert ausdrücklich nur den Systemdienst.
+`--no-user` installiert ausdrücklich nur den Systemdienst. Dabei werden keine
+Nutzerdaten abgefragt und keine lokale Benutzerschnittstelle gestartet.
 
 Der System-Marker enthält keine Zugangsdaten. Er ist eine zufällige Kennung,
 die nach erfolgreicher Einrichtung sowohl im Systemzustand als auch neben dem

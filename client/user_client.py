@@ -37,11 +37,36 @@ def main():
             root.after(0, lambda: messagebox.showerror(item['title'], str(exc)))
       threading.Thread(target=worker, daemon=True).start()
 
+   def change_password():
+      dialog = tk.Toplevel(root)
+      dialog.title('Passwort ändern')
+      frame = tk.Frame(dialog, padx=18, pady=18)
+      frame.pack()
+      entries = []
+      for row, label in enumerate(('Altes Passwort', 'Neues Passwort', 'Neues Passwort wiederholen')):
+         tk.Label(frame, text=label).grid(row=row, column=0, sticky='w', pady=4)
+         entry = tk.Entry(frame, show='*', width=30)
+         entry.grid(row=row, column=1, pady=4)
+         entries.append(entry)
+      def submit():
+         if entries[1].get() != entries[2].get():
+            messagebox.showerror(dialog.title(), 'Die neuen Passwörter stimmen nicht überein.')
+            return
+         result = request(config, 'change_password', old_password=entries[0].get(), new_password=entries[1].get())
+         if not result.get('ok'):
+            messagebox.showerror(dialog.title(), result.get('error', 'Passwortänderung fehlgeschlagen.'))
+            return
+         dialog.destroy()
+         request(config, 'execute', capability_id='logout')
+      tk.Button(frame, text='Passwort ändern und abmelden', command=submit).grid(row=3, column=0, columnspan=2, sticky='e', pady=(12, 0))
+      entries[0].focus_set()
+
    for item in capabilities:
       row = tk.Frame(body, pady=4)
       row.pack(fill='x')
       tk.Label(row, text=item['title'], anchor='w').pack(side='left', fill='x', expand=True)
       tk.Button(row, text='Ausf\u00fchren', command=lambda value=item: execute(value)).pack(side='right')
+   tk.Button(body, text='Passwort ändern', command=change_password).pack(anchor='e', pady=(12, 0))
    if not capabilities:
       tk.Label(body, text='Keine lokal ausf\u00fchrbaren F\u00e4higkeiten installiert.').pack(anchor='w')
    root.mainloop()
