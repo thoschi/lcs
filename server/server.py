@@ -19,6 +19,29 @@ BASE = Path(__file__).resolve().parent
 MAX_REQUEST_BYTES = int(os.environ.get('LCS_MAX_REQUEST_BYTES', str(2 * 1024 * 1024)))
 ADMIN_USERS = {value.strip() for value in os.environ.get('LCS_ADMIN_USERS', '').split(',') if value.strip()}
 
+STANDARD_CAPABILITIES = (
+   {'id': 'shutdown', 'version': '1', 'title': 'Herunterfahren',
+    'description': 'Fährt diesen Computer herunter.', 'parameters': {}},
+   {'id': 'reboot', 'version': '1', 'title': 'Neu starten',
+    'description': 'Startet diesen Computer neu.', 'parameters': {}},
+   {'id': 'logout', 'version': '1', 'title': 'Abmelden',
+    'description': 'Meldet den aktuellen Benutzer ab.', 'parameters': {}},
+)
+LINBO_CAPABILITIES = (
+   {'id': 'linbo_start', 'version': '2', 'title': 'Betriebssystem starten',
+    'description': 'Startet das Betriebssystem an der angegebenen Position.', 'parameters': {'position': 1}},
+   {'id': 'linbo_sync_start', 'version': '2', 'title': 'Synchronisieren und starten',
+    'description': 'Synchronisiert und startet das Betriebssystem an der angegebenen Position.',
+    'parameters': {'position': 1}},
+   {'id': 'linbo_new_start', 'version': '2', 'title': 'Neu und starten',
+    'description': 'Formatiert, synchronisiert und startet das Betriebssystem an der angegebenen Position.',
+    'parameters': {'position': 1}},
+   {'id': 'linbo_partition', 'version': '1', 'title': 'Partitionieren',
+    'description': 'Partitioniert den Datenträger gemäß start.conf.', 'parameters': {}},
+   {'id': 'linbo_format', 'version': '1', 'title': 'Partitionieren und formatieren',
+    'description': 'Partitioniert und formatiert den Datenträger gemäß start.conf.', 'parameters': {}},
+)
+
 core.init_db()
 
 app = Flask(__name__, template_folder='web/templates', static_folder='web/static')
@@ -95,6 +118,17 @@ def current_client_version(devices):
    versions = {device['agent_version'] for device in devices if device.get('agent_version')}
    return max(versions, key=lambda version: (
       tuple(int(part) for part in re.findall(r'\d+', version)), version), default='')
+
+
+def executable_capabilities(device):
+   """Combine protocol-level standard actions with additional client reports."""
+   capabilities = {item['id']: dict(item) for item in STANDARD_CAPABILITIES
+                   if item['id'] != 'logout' or (device.get('platform') or '').lower() != 'linbo'}
+   if (device.get('platform') or '').lower() == 'linbo':
+      capabilities.update((item['id'], dict(item)) for item in LINBO_CAPABILITIES)
+   capabilities.update((item['id'], dict(item))
+                       for item in device.get('hardware', {}).get('capabilities', []))
+   return list(capabilities.values())
 
 
 def dashboard_data():
@@ -224,17 +258,16 @@ def render_admin(new_token=None, editor=None, page='overview'):
           item.get('template_device_id') == token['template_device_id'] and
           item['id'] != token['template_device_id']) or
          (token['token_type'] != 'template' and token['group_name'] in (item.get('groups') or '').split(', '))]
-   # The server only displays capabilities reported by installed clients.
    capability_by_id = {}
    for device in devices:
-      reported = device.get('hardware', {}).get('capabilities', [])
-      device['executable_capabilities'] = [dict(item) for item in reported]
+      available = executable_capabilities(device)
+      device['executable_capabilities'] = available
       device['capability_states'] = [
          {'id': item['id'], 'title': item.get('title', item['id']), 'assigned': True, 'installed': True}
-         for item in reported
+         for item in available
       ]
       device['pending_task_count'] = 0
-      for item in reported:
+      for item in available:
          capability_by_id[item['id']] = dict(item)
    manifest = {'generation': 0, 'capabilities': sorted(capability_by_id.values(), key=lambda item: item['id'])}
    for group in groups:
@@ -357,12 +390,12 @@ def client_status():
    devices, _, _, _, actions, _ = dashboard_data()
    client_version = current_client_version(devices)
    for device in devices:
-      reported = device.get('hardware', {}).get('capabilities', [])
+      available = executable_capabilities(device)
       device['capability_states'] = [
          {'id': item['id'], 'title': item.get('title', item['id']), 'assigned': True, 'installed': True}
-         for item in reported
+         for item in available
       ]
-      device['executable_capabilities'] = [dict(item) for item in reported]
+      device['executable_capabilities'] = available
    return jsonify(current_client_version=client_version, devices=[{
       'id': item['id'],
       'online': item['online'],
@@ -621,9 +654,10 @@ def create_action():
       if not devices and not remember:
          raise ValueError('Kein Client für dieses Ziel gefunden.')
       capability_id = request.form.get('capability', '')
-      if not capability_id or any(not any(cap.get('id') == capability_id for cap in
-            json.loads(target['hardware_json'] or '{}').get('capabilities', [])) for target in devices):
-         raise ValueError('Die Fähigkeit ist nicht auf allen gewählten Clients installiert.')
+      if not capability_id or any(not any(cap['id'] == capability_id for cap in
+            executable_capabilities({**dict(target), 'hardware': json.loads(target['hardware_json'] or '{}')}))
+            for target in devices):
+         raise ValueError('Die Aufgabe ist nicht auf allen gewählten Clients verfügbar.')
       scope = 'system'
       username = request.form.get('username', '').strip()
       if remember:
