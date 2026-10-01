@@ -51,20 +51,24 @@ def run_once(config):
             debug('Statusabfrage fehlgeschlagen', error=error)
          previous_error = error
       time.sleep(2)
-   def initialize_and_logout(**payload):
+   def initialize(**payload):
       debug('Automatische Initialisierung wird angefordert')
       result = request(config, 'initialize', **payload)
       if not result.get('ok'):
          debug('Initialisierung fehlgeschlagen', error=result.get('error', 'Unbekannter Fehler'))
+      return result
+
+   def initialize_and_logout(**payload):
+      result = initialize(**payload)
+      if not result.get('ok'):
          return result
       debug('Initialisierung abgeschlossen; Abmeldung wird angefordert')
       logout = request(config, 'execute', capability_id='logout')
       return logout if not logout.get('ok') else result
 
-   # Linux can restore a saved shadow record without asking the user anything.
-   if os.name != 'nt' and status.get('domain_username') and not status.get('password_required'):
+   if status.get('domain_username'):
       debug('Domänenprofil wird ohne Dialog initialisiert')
-      result = initialize_and_logout()
+      result = initialize()
       return 0 if result.get('ok') else 1
    if status.get('profile_exists') and not status.get('password_required'):
       debug('Vorhandenes Profil wird ohne Dialog wiederhergestellt')

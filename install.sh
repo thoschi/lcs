@@ -425,11 +425,15 @@ write_client_env() {
    template_hostname="$(read_env_value "$LCS_CLIENT_ENV" LCS_TEMPLATE_HOSTNAME)"
    token_checksum="$(read_env_value "$LCS_CLIENT_ENV" LCS_TOKEN_CHECKSUM)"
    default_password="$(read_env_value "$LCS_CLIENT_ENV" LCS_DEFAULT_PASSWORD)"
-   if [ "$NO_USER" -eq 0 ] && [ -z "$password_username" ]; then
+   local domain_mode=0
+   case "${require_local_username,,}" in
+      1|true|yes|on) domain_mode=1 ;;
+   esac
+   if [ "$NO_USER" -eq 0 ] && [ "$domain_mode" -eq 0 ] && [ -z "$password_username" ]; then
       read -r -p "Lokaler Benutzer [nutzer]: " password_username </dev/tty
       password_username="${password_username:-nutzer}"
    fi
-   if [ "$NO_USER" -eq 0 ] && [ -z "$default_password" ]; then
+   if [ "$NO_USER" -eq 0 ] && [ "$domain_mode" -eq 0 ] && [ -z "$default_password" ]; then
       read -r -s -p "Standardpasswort für $password_username [corvi]: " default_password </dev/tty
       echo
       default_password="${default_password:-corvi}"
