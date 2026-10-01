@@ -202,19 +202,31 @@ def dashboard_data():
    return devices, groups, assignments, tokens, actions, template_tree
 
 
-def audit_data():
+def audit_data(limit, offset=0):
    with core.db() as conn:
+      page = conn.execute('''
+         SELECT kind, id FROM (
+            SELECT 'audit' AS kind, id, created_at AS timestamp, 'audit-' || id AS entry_key
+            FROM device_audit_log
+            UNION ALL
+            SELECT 'action' AS kind, id, created_at AS timestamp, 'action-' || id AS entry_key
+            FROM actions
+         ) ORDER BY timestamp DESC, entry_key DESC LIMIT ? OFFSET ?
+      ''', (limit, offset)).fetchall()
+      audit_ids = [row['id'] for row in page if row['kind'] == 'audit']
+      action_ids = [row['id'] for row in page if row['kind'] == 'action']
       audits = [dict(row) for row in conn.execute('''
          SELECT l.*, d.platform, d.agent_version, d.logged_in_users_json
          FROM device_audit_log l LEFT JOIN devices d ON d.id=l.device_id
-         ORDER BY l.created_at DESC, l.id DESC
-      ''').fetchall()]
+         WHERE l.id IN (%s)
+      ''' % ','.join('?' * len(audit_ids)), audit_ids).fetchall()] if audit_ids else []
       action_rows = [dict(row) for row in conn.execute('''
          SELECT a.*, COALESCE(d.hostname,
             (SELECT MAX(l.hostname) FROM device_audit_log l WHERE l.device_id=a.device_id),
             a.device_id) AS hostname, d.platform, d.agent_version, d.logged_in_users_json
          FROM actions a LEFT JOIN devices d ON d.id=a.device_id
-      ''').fetchall()]
+         WHERE a.id IN (%s)
+      ''' % ','.join('?' * len(action_ids)), action_ids).fetchall()] if action_ids else []
    labels = {'registered': 'Registrierung', 'reregistered': 'Neuregistrierung',
              'token_changed': 'Token geändert'}
    entries = [{
@@ -402,7 +414,13 @@ def admin_logging():
 @app.get('/admin/log-data')
 @admin_required
 def admin_log_data():
-   return jsonify(logs=audit_data())
+   limit = 200
+   try:
+      offset = max(0, int(request.args.get('offset', 0)))
+   except ValueError:
+      abort(400, 'Ungültiger Log-Offset')
+   logs = audit_data(limit + 1, offset)
+   return jsonify(logs=logs[:limit], more=len(logs) > limit, next_offset=offset + limit)
 
 
 @app.get('/admin/client-status')
