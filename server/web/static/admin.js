@@ -403,14 +403,19 @@
    const loadLogs = async () => {
       if (!logTable) return;
       try {
-         const response = await fetch(logTable.dataset.source, {headers: {'Accept': 'application/json'}});
-         if (!response.ok) throw new Error(`HTTP ${response.status}`);
-         const logs = (await response.json()).logs;
          logBody.replaceChildren();
          const aspectLabels = {registration: 'Registrierung', token: 'Token', action: 'Ausführung'};
-         for (let offset = 0; offset < logs.length; offset += 100) {
+         const clients = new Set();
+         const actions = new Set();
+         let offset = 0;
+         let more = true;
+         while (more) {
+            const response = await fetch(`${logTable.dataset.source}?offset=${offset}`, {headers: {'Accept': 'application/json'}});
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const data = await response.json();
+            const logs = data.logs;
             const fragment = document.createDocumentFragment();
-            logs.slice(offset, offset + 100).forEach(log => {
+            logs.forEach(log => {
                const row = document.createElement('tr');
                row.dataset.log = '';
                Object.assign(row.dataset, {timestamp: log.timestamp, client: log.hostname.toLocaleLowerCase('de-DE'),
@@ -469,18 +474,25 @@
                   });
                }
                fragment.appendChild(row);
+               clients.add(log.hostname);
+               actions.add(log.action);
             });
             logBody.appendChild(fragment);
-            await new Promise(resolve => requestAnimationFrame(resolve));
+            for (const [selector, values] of [['#log-client', clients], ['#log-action', actions]]) {
+               const select = document.querySelector(selector);
+               const selected = select.value;
+               select.replaceChildren(new Option(selector === '#log-client' ? 'Alle Clients' : 'Alle Aktionen', ''));
+               [...values].sort((a, b) => a.localeCompare(b, 'de')).forEach(value => select.add(new Option(value, value.toLocaleLowerCase('de-DE'))));
+               select.value = selected;
+            }
+            applyLogView();
+            more = data.more;
+            offset = data.next_offset;
+            if (more) await new Promise(resolve => requestAnimationFrame(resolve));
          }
-         if (!logs.length) logBody.innerHTML = '<tr class="log-empty"><td colspan="5" class="empty">Noch keine Logeinträge.</td></tr>';
-         for (const [selector, values] of [['#log-client', logs.map(log => log.hostname)], ['#log-action', logs.map(log => log.action)]]) {
-            const select = document.querySelector(selector);
-            [...new Set(values)].sort((a, b) => a.localeCompare(b, 'de')).forEach(value => select.add(new Option(value, value.toLocaleLowerCase('de-DE'))));
-         }
-         applyLogView();
+         if (!logRows().length) logBody.innerHTML = '<tr class="log-empty"><td colspan="5" class="empty">Noch keine Logeinträge.</td></tr>';
       } catch (_) {
-         logBody.querySelector('.empty').textContent = 'Logs konnten nicht geladen werden.';
+         if (!logRows().length) logBody.innerHTML = '<tr class="log-empty"><td colspan="5" class="empty">Logs konnten nicht geladen werden.</td></tr>';
       }
    };
 
