@@ -20,7 +20,7 @@ damit Netzwerk, IPC und Heartbeats auch während einer Aktion antwortfähig blei
   bereits gespeicherte Shadow-Zeile ohne Dialog wieder her. Nach erfolgreicher
   Einrichtung eines lokalen Kontos wird Autologin deaktiviert und die Sitzung
   beendet. Bei Domänenanmeldung wird dagegen nur der benutzerspezifische
-  LCS-Speicher eingerichtet und einmalig das Schulnetz-Passwort abgefragt.
+  LCS-Speicher ohne Passwortabfrage eingerichtet.
 * **LCS Benutzeraktionen** ist ein separat aufrufbares Menü. Es zeigt genau die
   vom lokalen Systemdienst als benutzerausführbar gemeldeten Fähigkeiten.
 * **`lcs-server`** registriert Geräte, zeigt deren Basisinformationen und die vom
@@ -96,9 +96,12 @@ Shadow-Zeile, wird die Einrichtung erneut ausgeführt.
 
 Ist „Angemeldeten Domänenbenutzer übernehmen“ aktiviert, gilt die Einrichtung
 für jeden Domänenbenutzer getrennt. Sein Benutzername ist bereits bekannt; der
-Dialog fragt daher nur das Schulnetz-Passwort ab. LCS legt den konfigurierten
-Benutzerdatenpfad an, speichert das Passwort aber nicht. Lokales Passwort,
-Shadow-Zeile und Autologin-Konfiguration bleiben in diesem Modus unverändert.
+Dienst legt daher ohne Dialog den konfigurierten Benutzerdatenpfad an. Die
+`credentials.json` enthält nur den Benutzernamen; daneben wird der Marker des
+jeweiligen Betriebssystems angelegt. Lokales Passwort, Shadow-Zeile und
+Autologin-Konfiguration bleiben in diesem Modus unverändert. Eine
+Passwortabfrage erscheint nur, wenn eine ausdrücklich gestartete Aufgabe sie
+benötigt.
 
 Server, Systemdienst und Benutzerprogramme werden mit `install server`,
 `install service` beziehungsweise `install client` einzeln installiert. Ein

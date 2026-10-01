@@ -60,7 +60,7 @@ def runtime_paths(config):
 
 
 def user_data_path(config, path_username=''):
-   local_username = path_username or config['LCS_PASSWORD_USERNAME'].strip()
+   local_username = path_username or config.get('LCS_PASSWORD_USERNAME', '').strip()
    default = (str(Path(os.environ.get('SystemDrive', 'C:')) / 'Users' / local_username / 'AppData' / 'Roaming' / 'LCS')
               if os.name == 'nt' else '/home/%s/.config/lcs' % local_username)
    configured = config.get('LCS_USER_DATA', default)
@@ -102,10 +102,11 @@ def user_marker_path(config, path_username=''):
 def initialization_status(config, local_username=''):
    if env_bool(config, 'LCS_USE_DOMAIN_USERNAME'):
       profile = load_json(user_profile_path(config, local_username), {})
-      profile_exists = profile.get('username') == local_username and bool(profile.get('password_hash'))
+      profile_exists = (profile == {'username': local_username} and
+                        user_marker_path(config, local_username).is_file())
       return {'profile_exists': profile_exists, 'username': local_username,
               'initialization_required': not profile_exists,
-              'password_required': not profile_exists, 'domain_username': True}
+              'password_required': False, 'domain_username': True}
    profile = load_json(user_profile_path(config, local_username), {})
    try:
       user_marker = user_marker_path(config, local_username).read_text(encoding='utf-8').strip()
@@ -204,14 +205,8 @@ def initialize_user(config, username='', password='', force=False, client_userna
          return {'ok': True, 'username': client_username}
       if not client_username:
          return {'ok': False, 'error': 'Domänenbenutzer konnte nicht ermittelt werden.'}
-      profile = load_json(profile_path, {})
-      if not password:
-         return {'ok': False, 'error': 'Passwort ist erforderlich.'}
-      if profile.get('password_hash') and not verify_password(password, profile['password_hash']):
-         return {'ok': False, 'error': 'Das eingegebene Passwort ist nicht korrekt.'}
-      disable_autologin()
-      save_json(profile_path, {'username': client_username,
-                               'password_hash': profile.get('password_hash') or password_hash(password)}, 0o600)
+      save_json(profile_path, {'username': client_username}, 0o600)
+      user_marker_path(config, client_username).write_text('initialized\n', encoding='utf-8')
       log('Domänenbenutzereinrichtung abgeschlossen', username=client_username)
       return {'ok': True, 'username': client_username}
    local_username = config['LCS_PASSWORD_USERNAME'].strip()
@@ -765,8 +760,9 @@ def run_forever(env_path=None, stop_requested=None):
    if not config.get('LCS_SERVER'):
       raise RuntimeError('LCS_SERVER missing in %s' % env_path)
    user_enabled = env_bool(config, 'LCS_USER_ENABLED', True)
-   missing = [key for key in ('LCS_PASSWORD_USERNAME', 'LCS_DEFAULT_PASSWORD')
-              if not config.get(key, '').strip()]
+   missing = ([] if env_bool(config, 'LCS_USE_DOMAIN_USERNAME') else
+              [key for key in ('LCS_PASSWORD_USERNAME', 'LCS_DEFAULT_PASSWORD')
+               if not config.get(key, '').strip()])
    if user_enabled and missing:
       raise RuntimeError('Erforderliche Einträge fehlen in %s: %s' %
                          (env_path, ', '.join(missing)))

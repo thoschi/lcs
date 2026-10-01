@@ -291,11 +291,12 @@ function Write-ClientEnv {
    $templateHostname = Read-EnvValue $ClientEnv 'LCS_TEMPLATE_HOSTNAME'
    $tokenChecksum = Read-EnvValue $ClientEnv 'LCS_TOKEN_CHECKSUM'
    $defaultPassword = Read-EnvValue $ClientEnv 'LCS_DEFAULT_PASSWORD'
-   if (-not $NoUser -and -not $passwordUsername) {
+   $domainMode = @('1', 'true', 'yes', 'on') -contains ([string]$requireLocalUsername).ToLowerInvariant()
+   if (-not $NoUser -and -not $domainMode -and -not $passwordUsername) {
       $passwordUsername = Read-Host 'Lokaler Benutzer [nutzer]'
       if (-not $passwordUsername) { $passwordUsername = 'nutzer' }
    }
-   if (-not $NoUser -and -not $defaultPassword) {
+   if (-not $NoUser -and -not $domainMode -and -not $defaultPassword) {
       $credential = Get-Credential -UserName $passwordUsername -Message 'Standardpasswort für das lokale Benutzerkonto'
       if (-not $credential) { throw 'Standardpasswort fehlt.' }
       $defaultPassword = $credential.GetNetworkCredential().Password
