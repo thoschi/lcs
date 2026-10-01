@@ -205,12 +205,14 @@ def dashboard_data():
 def audit_data():
    with core.db() as conn:
       audits = [dict(row) for row in conn.execute('''
-         SELECT * FROM device_audit_log ORDER BY created_at DESC, id DESC
+         SELECT l.*, d.platform, d.agent_version, d.logged_in_users_json
+         FROM device_audit_log l LEFT JOIN devices d ON d.id=l.device_id
+         ORDER BY l.created_at DESC, l.id DESC
       ''').fetchall()]
       action_rows = [dict(row) for row in conn.execute('''
          SELECT a.*, COALESCE(d.hostname,
             (SELECT MAX(l.hostname) FROM device_audit_log l WHERE l.device_id=a.device_id),
-            a.device_id) AS hostname
+            a.device_id) AS hostname, d.platform, d.agent_version, d.logged_in_users_json
          FROM actions a LEFT JOIN devices d ON d.id=a.device_id
       ''').fetchall()]
    labels = {'registered': 'Registrierung', 'reregistered': 'Neuregistrierung',
@@ -227,6 +229,18 @@ def audit_data():
       'old_token_hash': '', 'new_token_hash': '', 'timestamp': item['created_at'],
    } for item in action_rows)
    entries.sort(key=lambda item: (item['timestamp'], item['key']), reverse=True)
+   for entry in entries:
+      try:
+         users = json.loads(entry.get('logged_in_users_json') or '[]')
+      except (json.JSONDecodeError, TypeError):
+         users = []
+      if not isinstance(users, list):
+         users = []
+      entry['client_hint'] = '\n'.join((
+         'Betriebssystem: %s' % (entry.get('platform') or '–'),
+         'Nutzer: %s' % (', '.join(users) or '–'),
+         'LCS-Version: %s' % (entry.get('agent_version') or '–'),
+      ))
    return entries
 
 
@@ -245,7 +259,8 @@ def render_admin(new_token=None, editor=None, page='overview'):
          target['connection_count'] = 1
          target['connections'] = [item]
          task_devices.append(target)
-   logs = audit_data() if page == 'logging' else []
+   # Die große Log-Abfrage erfolgt über einen separaten Request, damit die Navigation sofort bereitsteht.
+   logs = []
    device_by_id = {item['id']: item for item in devices}
    for token in tokens:
       token['template'] = device_by_id.get(token['template_device_id'])
@@ -382,6 +397,12 @@ def admin_tokens():
 @admin_required
 def admin_logging():
    return render_admin(page='logging')
+
+
+@app.get('/admin/log-data')
+@admin_required
+def admin_log_data():
+   return jsonify(logs=audit_data())
 
 
 @app.get('/admin/client-status')
