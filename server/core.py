@@ -680,12 +680,12 @@ def user_heartbeat(token):
 def resolve_devices(target):
    with db() as conn:
       if target == 'all':
-         return conn.execute('''SELECT MIN(id) AS id, hostname FROM devices
+         return conn.execute('''SELECT MIN(id) AS id, hostname, platform, hardware_json FROM devices
             GROUP BY lower(hostname) ORDER BY hostname''').fetchall()
       if target.startswith('group:'):
          group_name = target.split(':', 1)[1]
          return conn.execute('''
-            SELECT MIN(d.id) AS id, d.hostname FROM devices d
+            SELECT MIN(d.id) AS id, d.hostname, d.platform, d.hardware_json FROM devices d
             JOIN devices grouped_device
                ON lower(grouped_device.hostname)=lower(d.hostname)
             JOIN device_groups g ON g.device_id=grouped_device.id
@@ -697,7 +697,7 @@ def resolve_devices(target):
          (target, target)).fetchone()
       if not selected:
          return []
-      return conn.execute('''SELECT MIN(id) AS id, hostname FROM devices
+      return conn.execute('''SELECT MIN(id) AS id, hostname, platform, hardware_json FROM devices
          WHERE lower(hostname)=lower(?) AND is_image_source=0 GROUP BY lower(hostname)''',
          (selected['hostname'],)).fetchall()
 
