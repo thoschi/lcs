@@ -400,8 +400,93 @@
       });
    }));
 
+   const loadLogs = async () => {
+      if (!logTable) return;
+      try {
+         const response = await fetch(logTable.dataset.source, {headers: {'Accept': 'application/json'}});
+         if (!response.ok) throw new Error(`HTTP ${response.status}`);
+         const logs = (await response.json()).logs;
+         logBody.replaceChildren();
+         const aspectLabels = {registration: 'Registrierung', token: 'Token', action: 'Ausführung'};
+         for (let offset = 0; offset < logs.length; offset += 100) {
+            const fragment = document.createDocumentFragment();
+            logs.slice(offset, offset + 100).forEach(log => {
+               const row = document.createElement('tr');
+               row.dataset.log = '';
+               Object.assign(row.dataset, {timestamp: log.timestamp, client: log.hostname.toLocaleLowerCase('de-DE'),
+                  action: log.action.toLocaleLowerCase('de-DE'), aspect: log.aspect,
+                  search: [log.hostname, log.device_id, log.action, log.status, log.result_json].join(' ').toLocaleLowerCase('de-DE')});
+               for (let index = 0; index < 5; index += 1) row.appendChild(document.createElement('td'));
+               row.cells[0].textContent = formatTime(log.timestamp);
+               const hostname = document.createElement('strong');
+               hostname.textContent = log.hostname;
+               hostname.title = log.client_hint;
+               const deviceId = document.createElement('small');
+               const code = document.createElement('code');
+               code.textContent = log.device_id;
+               deviceId.appendChild(code);
+               row.cells[1].append(hostname, deviceId);
+               const action = document.createElement('strong');
+               action.textContent = log.action;
+               row.cells[2].appendChild(action);
+               if (log.aspect === 'action') {
+                  const schedule = document.createElement('small');
+                  schedule.textContent = `#${log.id} · geplant ${formatTime(log.run_at)}`;
+                  row.cells[2].appendChild(schedule);
+               }
+               const aspect = document.createElement('span');
+               aspect.className = `pill ${log.aspect === 'registration' ? 'good' : ''}`.trim();
+               aspect.textContent = aspectLabels[log.aspect];
+               row.cells[3].appendChild(aspect);
+               if (log.aspect === 'action') {
+                  const status = document.createElement('span');
+                  status.className = `pill ${log.status === 'done' ? 'good' : log.status === 'failed' ? 'bad' : ''}`.trim();
+                  status.textContent = log.status;
+                  row.cells[4].appendChild(status);
+                  if (log.finished_at) {
+                     const finished = document.createElement('small');
+                     finished.textContent = `Beendet ${formatTime(log.finished_at)}`;
+                     row.cells[4].appendChild(finished);
+                  }
+                  if (log.result_json) {
+                     const details = document.createElement('details');
+                     const summary = document.createElement('summary');
+                     const output = document.createElement('pre');
+                     summary.textContent = 'Rückmeldung anzeigen';
+                     try { output.textContent = JSON.stringify(JSON.parse(log.result_json), null, 2); }
+                     catch (_) { output.textContent = log.result_json; }
+                     details.append(summary, output);
+                     row.cells[4].appendChild(details);
+                  }
+               } else {
+                  ['old_token_hash', 'new_token_hash'].forEach((key, index) => {
+                     const line = document.createElement('small');
+                     line.textContent = `${index ? 'Neuer' : 'Alter'} Fingerabdruck: `;
+                     const fingerprint = document.createElement('code');
+                     fingerprint.textContent = log[key] ? `${log[key].slice(0, 12)}…` : '–';
+                     line.appendChild(fingerprint);
+                     row.cells[4].appendChild(line);
+                  });
+               }
+               fragment.appendChild(row);
+            });
+            logBody.appendChild(fragment);
+            await new Promise(resolve => requestAnimationFrame(resolve));
+         }
+         if (!logs.length) logBody.innerHTML = '<tr class="log-empty"><td colspan="5" class="empty">Noch keine Logeinträge.</td></tr>';
+         for (const [selector, values] of [['#log-client', logs.map(log => log.hostname)], ['#log-action', logs.map(log => log.action)]]) {
+            const select = document.querySelector(selector);
+            [...new Set(values)].sort((a, b) => a.localeCompare(b, 'de')).forEach(value => select.add(new Option(value, value.toLocaleLowerCase('de-DE'))));
+         }
+         applyLogView();
+      } catch (_) {
+         logBody.querySelector('.empty').textContent = 'Logs konnten nicht geladen werden.';
+      }
+   };
+
    applyView();
    applyLogView();
+   loadLogs();
    if (table || document.querySelector('#action-table') || document.querySelector('[data-status-device-id]')) {
       let refreshTimer;
       let refreshRunning = false;
