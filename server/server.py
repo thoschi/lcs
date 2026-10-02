@@ -161,7 +161,7 @@ def dashboard_data():
             executed.id AS executed_device_id
          FROM actions a JOIN devices d ON d.id=a.device_id
          LEFT JOIN devices executed ON executed.id=a.execution_device_id
-         ORDER BY a.id DESC LIMIT 40
+         ORDER BY a.id DESC LIMIT 500
       ''').fetchall()]
    for item in devices:
       item['online'] = item['last_seen'] >= now - 60
@@ -204,29 +204,14 @@ def dashboard_data():
 
 def audit_data(limit, offset=0):
    with core.db() as conn:
-      page = conn.execute('''
-         SELECT kind, id FROM (
-            SELECT 'audit' AS kind, id, created_at AS timestamp, 'audit-' || id AS entry_key
-            FROM device_audit_log
-            UNION ALL
-            SELECT 'action' AS kind, id, created_at AS timestamp, 'action-' || id AS entry_key
-            FROM actions
-         ) ORDER BY timestamp DESC, entry_key DESC LIMIT ? OFFSET ?
-      ''', (limit, offset)).fetchall()
+      page = conn.execute('''SELECT 'audit' AS kind, id FROM device_audit_log
+         ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?''', (limit, offset)).fetchall()
       audit_ids = [row['id'] for row in page if row['kind'] == 'audit']
-      action_ids = [row['id'] for row in page if row['kind'] == 'action']
       audits = [dict(row) for row in conn.execute('''
          SELECT l.*, d.platform, d.agent_version, d.logged_in_users_json
          FROM device_audit_log l LEFT JOIN devices d ON d.id=l.device_id
          WHERE l.id IN (%s)
       ''' % ','.join('?' * len(audit_ids)), audit_ids).fetchall()] if audit_ids else []
-      action_rows = [dict(row) for row in conn.execute('''
-         SELECT a.*, COALESCE(d.hostname,
-            (SELECT MAX(l.hostname) FROM device_audit_log l WHERE l.device_id=a.device_id),
-            a.device_id) AS hostname, d.platform, d.agent_version, d.logged_in_users_json
-         FROM actions a LEFT JOIN devices d ON d.id=a.device_id
-         WHERE a.id IN (%s)
-      ''' % ','.join('?' * len(action_ids)), action_ids).fetchall()] if action_ids else []
    labels = {'registered': 'Registrierung', 'reregistered': 'Neuregistrierung',
              'token_changed': 'Token geändert'}
    entries = [{
@@ -235,11 +220,6 @@ def audit_data(limit, offset=0):
       'action': labels.get(item['event_type'], item['event_type']),
       'status': '', 'result_json': '', 'timestamp': item['created_at'],
    } for item in audits]
-   entries.extend({
-      **item, 'key': 'action-%s' % item['id'], 'aspect': 'action',
-      'action': item['capability_id'], 'event_type': 'action',
-      'old_token_hash': '', 'new_token_hash': '', 'timestamp': item['created_at'],
-   } for item in action_rows)
    entries.sort(key=lambda item: (item['timestamp'], item['key']), reverse=True)
    for entry in entries:
       try:
@@ -301,8 +281,14 @@ def render_admin(new_token=None, editor=None, page='overview'):
       members = [device for device in devices if group['name'] in (device.get('groups') or '').split(', ')]
       group['members'] = members
       group['capability_states'] = []
+      group['executable_capabilities'] = [capability for capability in manifest['capabilities']
+         if members and all(any(item['id'] == capability['id'] for item in member['executable_capabilities'])
+                            for member in members)]
    all_group = {'name': 'alle', 'description': 'Alle Clients', 'device_count': len(devices),
-                'members': devices, 'virtual': True, 'capability_states': []}
+                'members': devices, 'virtual': True, 'capability_states': [],
+                'executable_capabilities': [capability for capability in manifest['capabilities']
+                   if devices and all(any(item['id'] == capability['id'] for item in device['executable_capabilities'])
+                                      for device in devices)]}
    return render_template('admin.html', devices=devices, groups=groups, assignments=assignments,
                           tokens=tokens, actions=actions, manifest=manifest,
                           now=core.now_ts(), new_token=new_token, editor=editor or {}, template_tree=template_tree,
@@ -715,7 +701,20 @@ def create_action():
    else:
       flash('%d Aktion(en) eingeplant%s.' % (len(devices),
             ' und für neue Gruppenmitglieder vorgemerkt' if remember else ''), 'success')
-   return redirect(url_for('admin_logging'))
+   return redirect(url_for('admin_tasks'))
+
+
+@app.post('/admin/action/<int:action_id>/delete')
+@admin_required
+def delete_action(action_id):
+   check_csrf()
+   with core.db() as conn:
+      action = conn.execute('SELECT status FROM actions WHERE id=?', (action_id,)).fetchone()
+      if not action:
+         abort(404)
+      conn.execute('DELETE FROM actions WHERE id=?', (action_id,))
+   flash('Auftrag #%d gelöscht.' % action_id, 'success')
+   return redirect(url_for('admin_tasks'))
 
 
 def main():
