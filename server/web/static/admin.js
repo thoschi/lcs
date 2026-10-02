@@ -47,6 +47,7 @@
    let sortAscending = true;
    const rows = () => body ? [...body.querySelectorAll('tr[data-entry]')] : [];
    const clientRows = () => rows().filter(row => row.dataset.clientId);
+   const executionRows = () => rows().filter(row => row.dataset.executionTarget);
 
    const applyView = () => {
       if (!table) return;
@@ -105,6 +106,7 @@
    }));
 
    const selectedClients = () => clientRows().filter(row => row.querySelector('.client-select').checked);
+   const selectedExecutionTargets = () => executionRows().filter(row => row.querySelector('.execution-select').checked);
    const selectionToggle = document.querySelector('#select-filtered-clients');
    const manageTasksModal = document.querySelector('#manage-tasks-modal');
    const executeModal = document.querySelector('#execute-modal');
@@ -115,9 +117,9 @@
    const capabilityStatesFor = row => JSON.parse(row.dataset.capabilityStates || '[]');
 
    const updateSelection = () => {
-      const selected = selectedClients();
-      const visible = clientRows().filter(row => !row.hidden);
-      const selectedVisible = visible.filter(row => row.querySelector('.client-select').checked).length;
+      const selected = selectedExecutionTargets();
+      const visible = executionRows().filter(row => !row.hidden);
+      const selectedVisible = visible.filter(row => row.querySelector('.execution-select').checked).length;
       document.querySelector('#client-selection-count').textContent = selected.length
          ? `${selected.length} Client${selected.length === 1 ? '' : 's'} ausgewählt` : 'Keine Clients ausgewählt';
       const manageTasksButton = document.querySelector('#manage-tasks-selected');
@@ -127,9 +129,9 @@
       selectionToggle.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
    };
 
-   document.querySelectorAll('.client-select').forEach(input => input.addEventListener('change', updateSelection));
+   document.querySelectorAll('.execution-select').forEach(input => input.addEventListener('change', updateSelection));
    selectionToggle?.addEventListener('change', () => {
-      clientRows().filter(row => !row.hidden).forEach(row => { row.querySelector('.client-select').checked = selectionToggle.checked; });
+      executionRows().filter(row => !row.hidden).forEach(row => { row.querySelector('.execution-select').checked = selectionToggle.checked; });
       updateSelection();
    });
    applyView();
@@ -189,12 +191,12 @@
    });
 
    document.querySelector('#execute-selected')?.addEventListener('click', () => {
-      const selected = selectedClients();
+      const selected = selectedExecutionTargets();
       const common = capabilitiesFor(selected[0]).filter(capability =>
          selected.every(row => capabilitiesFor(row).some(item => item.id === capability.id)));
       document.querySelector('#execute-targets').replaceChildren(...selected.map(row => {
          const input = document.createElement('input');
-         input.type = 'hidden'; input.name = 'targets'; input.value = row.dataset.clientId;
+         input.type = 'hidden'; input.name = 'targets'; input.value = row.dataset.executionTarget;
          return input;
       }));
       document.querySelector('#execute-client-title').textContent = `Code auf ${selected.length} Client${selected.length === 1 ? '' : 's'} ausführen`;
@@ -255,12 +257,14 @@
          if (!row) {
             row = document.createElement('tr');
             row.dataset.actionId = action.id;
-            for (let index = 0; index < 7; index += 1) row.appendChild(document.createElement('td'));
+            for (let index = 0; index < 8; index += 1) row.appendChild(document.createElement('td'));
             actionBody.prepend(row);
          }
          const actionState = JSON.stringify(action);
          if (row.dataset.actionState === actionState) return;
          row.dataset.actionState = actionState;
+         row.dataset.actionStatus = action.status;
+         row.dataset.actionSearch = `${action.id} ${action.hostname} ${action.capability_id} ${action.status}`.toLocaleLowerCase('de-DE');
          const cells = row.cells;
          cells[0].textContent = `#${action.id}`;
          cells[1].textContent = action.hostname;
@@ -273,6 +277,8 @@
          cells[4].textContent = formatTime(action.run_at);
          cells[5].textContent = formatTime(action.finished_at);
          setActionResult(cells[6], action.result);
+         cells[7].innerHTML = `<form method="post" action="/admin/action/${action.id}/delete" onsubmit="return confirm('Auftrag #${action.id} endgültig löschen?')"><input type="hidden" name="csrf"><button class="danger">Löschen</button></form>`;
+         cells[7].querySelector('[name=csrf]').value = document.querySelector('input[name=csrf]')?.value || '';
          row.title = action.execution_device_id
             ? `Übertragen/ausgeführt über ${action.execution_platform || 'unbekanntes Betriebssystem'} (Token ${action.execution_device_id})`
             : 'Noch an keinen Token übertragen';
@@ -280,7 +286,38 @@
       knownRows.forEach((row, id) => {
          if (!actions.some(action => action.id === id)) row.remove();
       });
+      applyActionView();
    };
+
+   const actionSearch = document.querySelector('#action-search');
+   const applyActionView = () => {
+      const actionRows = [...document.querySelectorAll('#action-table tbody tr[data-action-id]')];
+      const term = (actionSearch?.value || '').trim().toLocaleLowerCase('de-DE');
+      const active = document.querySelector('[data-action-filter] button.active')?.dataset.value || '';
+      let visible = 0;
+      actionRows.forEach(row => {
+         const status = row.dataset.actionStatus;
+         const stateMatches = !active || (active === 'open' ? ['queued', 'running'].includes(status)
+            : active === 'finished' ? status === 'done' : status === active);
+         row.hidden = !stateMatches || !(row.dataset.actionSearch || row.textContent.toLocaleLowerCase('de-DE')).includes(term);
+         if (!row.hidden) visible += 1;
+      });
+      const result = document.querySelector('#action-result-count');
+      if (result) result.textContent = `${visible} von ${actionRows.length} Aufträgen`;
+   };
+   actionSearch?.addEventListener('input', applyActionView);
+   document.querySelector('[data-action-filter]')?.addEventListener('click', event => {
+      const button = event.target.closest('button');
+      if (!button) return;
+      event.currentTarget.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
+      applyActionView();
+   });
+   applyActionView();
+   document.querySelector('#new-action-modal form.modal-form')?.addEventListener('submit', event => {
+      const date = event.currentTarget.querySelector('[data-action-date]').value;
+      event.currentTarget.querySelector('[data-action-timestamp]').value = date
+         ? String(Math.floor(new Date(date).getTime() / 1000)) : '';
+   });
 
    const updateStatus = async () => {
       const indicators = [document.querySelector('#client-refresh-state'), document.querySelector('#action-refresh-state')].filter(Boolean);

@@ -724,21 +724,23 @@ def poll_actions(device_id, token):
    horizon = now + ACTION_PREFETCH
    lease = now + ACTION_LEASE
    with db() as conn:
+      conn.execute('''UPDATE actions SET status='failed', finished_at=?, lease_until=NULL,
+         result_json=? WHERE scope='system' AND status='running' AND COALESCE(lease_until,0)<?''',
+         (now, json.dumps({'error': 'Keine Abschlussmeldung innerhalb der Ausführungsfrist'},
+                          ensure_ascii=False), now))
       rows = conn.execute('''
          SELECT a.* FROM actions a JOIN devices target ON target.id=a.device_id
          WHERE lower(target.hostname)=lower(?) AND a.scope='system' AND a.run_at<=? AND (
-            (status='queued' AND (a.execution_device_id='' OR a.execution_device_id=?)) OR
-            (status='running' AND COALESCE(lease_until,0)<?)
+            status='queued' AND (a.execution_device_id='' OR a.execution_device_id=?)
          ) ORDER BY run_at, a.id LIMIT 50
-      ''', (device['hostname'], horizon, device['id'], now)).fetchall()
+      ''', (device['hostname'], horizon, device['id'])).fetchall()
       result = []
       for row in rows:
          claimed = conn.execute('''UPDATE actions SET status='running', lease_until=?,
             started_at=COALESCE(started_at, ?), execution_device_id=? WHERE id=? AND
-            ((status='queued' AND (execution_device_id='' OR execution_device_id=?)) OR
-            (status='running' AND COALESCE(lease_until,0)<?))''',
+            status='queued' AND (execution_device_id='' OR execution_device_id=?)''',
             (max(lease, row['run_at'] + ACTION_LEASE), now, device['id'], row['id'],
-             device['id'], now))
+             device['id']))
          if not claimed.rowcount:
             continue
          result.append({
@@ -788,12 +790,15 @@ def poll_user_actions(token):
    now = now_ts()
    with db() as conn:
       device = conn.execute('SELECT hostname FROM devices WHERE id=?', (session['device_id'],)).fetchone()
+      conn.execute('''UPDATE actions SET status='failed', finished_at=?, lease_until=NULL,
+         result_json=? WHERE scope='user' AND status='running' AND COALESCE(lease_until,0)<?''',
+         (now, json.dumps({'error': 'Keine Abschlussmeldung innerhalb der Ausführungsfrist'},
+                          ensure_ascii=False), now))
       rows = conn.execute('''
          SELECT a.* FROM actions a JOIN devices target ON target.id=a.device_id
          WHERE lower(target.hostname)=lower(?) AND a.scope='user' AND a.run_at<=? AND
-            (username='' OR username=?) AND (status='queued' OR
-            (status='running' AND COALESCE(lease_until,0)<?)) ORDER BY run_at,a.id LIMIT 20
-      ''', (device['hostname'], now, session['username'], now)).fetchall()
+            (username='' OR username=?) AND status='queued' ORDER BY run_at,a.id LIMIT 20
+      ''', (device['hostname'], now, session['username'])).fetchall()
       for row in rows:
          conn.execute('''UPDATE actions SET status='running', lease_until=?,
             started_at=COALESCE(started_at,?), execution_device_id=? WHERE id=?''',
