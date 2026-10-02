@@ -717,6 +717,24 @@ def delete_action(action_id):
    return redirect(url_for('admin_tasks'))
 
 
+@app.post('/admin/actions/delete')
+@admin_required
+def delete_actions():
+   check_csrf()
+   try:
+      action_ids = {int(value) for value in request.form.getlist('action_ids')}
+   except ValueError:
+      abort(400, 'Ungültige Auftragsauswahl')
+   if not action_ids:
+      abort(400, 'Keine Aufträge ausgewählt')
+   with core.db() as conn:
+      placeholders = ','.join('?' * len(action_ids))
+      deleted = conn.execute(
+         'DELETE FROM actions WHERE id IN (%s)' % placeholders, tuple(action_ids)).rowcount
+   flash('%d Auftrag/Aufträge gelöscht.' % deleted, 'success')
+   return redirect(url_for('admin_tasks'))
+
+
 def main():
    app.run(host=HOST, port=PORT, threaded=True)
 
