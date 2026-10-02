@@ -71,11 +71,18 @@ type action struct {
 var capabilities = []capability{
 	{"shutdown", "1", "Herunterfahren", "Fährt den LINBO-Client herunter.", false},
 	{"reboot", "1", "Neu starten", "Startet den LINBO-Client neu.", false},
-	{"linbo_start", "2", "Betriebssystem starten", "Startet das Betriebssystem an der angegebenen Position.", false},
-	{"linbo_sync_start", "2", "Synchronisieren und starten", "Synchronisiert und startet das Betriebssystem an der angegebenen Position.", false},
-	{"linbo_new_start", "2", "Neu und starten", "Formatiert, synchronisiert und startet das Betriebssystem an der angegebenen Position.", false},
-	{"linbo_partition", "1", "Partitionieren", "Partitioniert den Datenträger gemäß start.conf.", false},
-	{"linbo_format", "1", "Partitionieren und formatieren", "Partitioniert und formatiert den Datenträger gemäß start.conf.", false},
+	{"linbo_start_1", "3", "Starten 1", "Startet Betriebssystem 1.", false},
+	{"linbo_start_2", "3", "Starten 2", "Startet Betriebssystem 2.", false},
+	{"linbo_start_3", "3", "Starten 3", "Startet Betriebssystem 3.", false},
+	{"linbo_sync_1", "3", "Synchronisieren 1", "Synchronisiert Betriebssystem 1.", false},
+	{"linbo_sync_2", "3", "Synchronisieren 2", "Synchronisiert Betriebssystem 2.", false},
+	{"linbo_sync_3", "3", "Synchronisieren 3", "Synchronisiert Betriebssystem 3.", false},
+	{"linbo_format_1", "3", "Formatieren 1", "Formatiert Betriebssystem 1.", false},
+	{"linbo_format_2", "3", "Formatieren 2", "Formatiert Betriebssystem 2.", false},
+	{"linbo_format_3", "3", "Formatieren 3", "Formatiert Betriebssystem 3.", false},
+	{"linbo_new_1", "3", "Neu 1", "Erstellt Betriebssystem 1 neu.", false},
+	{"linbo_new_2", "3", "Neu 2", "Erstellt Betriebssystem 2 neu.", false},
+	{"linbo_new_3", "3", "Neu 3", "Erstellt Betriebssystem 3 neu.", false},
 }
 
 func main() {
@@ -380,36 +387,19 @@ func (a *agent) execute(item action) (string, error) {
 		commands = []string{"halt"}
 	case "reboot":
 		commands = []string{"reboot"}
-	case "linbo_partition":
-		commands = []string{"partition"}
-	case "linbo_format":
-		commands = []string{"format"}
-	case "linbo_start", "linbo_sync_start", "linbo_new_start":
-		var parameters struct {
-			Position json.RawMessage `json:"position"`
-			OS       json.RawMessage `json:"os"`
+	default:
+		parts := strings.Split(item.CapabilityID, "_")
+		if len(parts) != 3 || parts[0] != "linbo" {
+			return "", fmt.Errorf("Fähigkeit ist lokal nicht vorhanden: %s", item.CapabilityID)
 		}
-		if err := json.Unmarshal(item.Parameters, &parameters); err != nil {
-			return "", errors.New("ungültige Aktionsparameter")
-		}
-		position, err := parsePosition(parameters.Position)
-		if err != nil && len(parameters.OS) != 0 {
-			position, err = parsePosition(parameters.OS)
-		}
-		if err != nil || position < 1 || position > len(readOperatingSystems(a.startConf)) {
+		position, err := strconv.Atoi(parts[2])
+		if err != nil || position < 1 || position > 3 || position > len(readOperatingSystems(a.startConf)) {
 			return "", errors.New("ungültige Betriebssystemposition")
 		}
-		suffix := strconv.Itoa(position)
-		switch item.CapabilityID {
-		case "linbo_start":
-			commands = []string{"start:" + suffix}
-		case "linbo_sync_start":
-			commands = []string{"sync:" + suffix, "start:" + suffix}
-		case "linbo_new_start":
-			commands = []string{"new:" + suffix, "start:" + suffix}
+		if parts[1] != "start" && parts[1] != "sync" && parts[1] != "format" && parts[1] != "new" {
+			return "", fmt.Errorf("Fähigkeit ist lokal nicht vorhanden: %s", item.CapabilityID)
 		}
-	default:
-		return "", fmt.Errorf("Fähigkeit ist lokal nicht vorhanden: %s", item.CapabilityID)
+		commands = []string{parts[1] + ":" + strconv.Itoa(position)}
 	}
 	output, err := exec.Command(a.wrapper, commands...).CombinedOutput()
 	message := string(output)
@@ -420,21 +410,6 @@ func (a *agent) execute(item action) (string, error) {
 		message = err.Error()
 	}
 	return message, err
-}
-
-func parsePosition(raw json.RawMessage) (int, error) {
-	if len(raw) == 0 {
-		return 0, errors.New("Position fehlt")
-	}
-	var number int
-	if err := json.Unmarshal(raw, &number); err == nil {
-		return number, nil
-	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err != nil {
-		return 0, err
-	}
-	return strconv.Atoi(text)
 }
 
 func (a *agent) report(id int64, message string, actionErr error) error {
