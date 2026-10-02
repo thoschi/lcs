@@ -18,11 +18,17 @@ CAPABILITIES = (
     'description': 'Meldet den aktuellen Benutzer ab.', 'user_executable': True},
 )
 
-LINBO_CAPABILITIES = (
-   {'id': 'linbo_sync', 'version': '1', 'title': 'LINBO synchronisieren',
-    'description': 'Synchronisiert und startet ein Betriebssystem.', 'user_executable': False},
-   {'id': 'linbo_start', 'version': '1', 'title': 'LINBO starten',
-    'description': 'Startet ein Betriebssystem.', 'user_executable': False},
+LINBO_CAPABILITIES = tuple(
+   {'id': 'linbo_%s_%d' % (command, position), 'version': '3',
+    'title': '%s %d' % (title, position),
+    'description': '%s Betriebssystem %d.' % (description, position), 'user_executable': False}
+   for command, title, description in (
+      ('start', 'Starten', 'Startet'),
+      ('sync', 'Synchronisieren', 'Synchronisiert'),
+      ('format', 'Formatieren', 'Formatiert'),
+      ('new', 'Neu', 'Erstellt neu'),
+   )
+   for position in range(1, 4)
 )
 
 
@@ -37,10 +43,10 @@ def execute(capability_id, username='', parameters=None):
    if capability_id not in {item['id'] for item in public_capabilities()}:
       raise ValueError('Diese Fähigkeit ist lokal nicht installiert: ' + capability_id)
    if capability_id.startswith('linbo_'):
-      os_name = str((parameters or {}).get('os', ''))
-      if not re.fullmatch(r'[A-Za-z0-9_.-]{1,64}', os_name):
-         raise RuntimeError('Ungültige Betriebssystembezeichnung.')
-      command = ['linbo_cmd', '-p' if capability_id == 'linbo_sync' else '-s', os_name]
+      match = re.fullmatch(r'linbo_(start|sync|format|new)_([1-3])', capability_id)
+      if not match:
+         raise RuntimeError('Ungültiger LINBO-Befehl.')
+      command = ['linbo_wrapper', '%s:%s' % match.groups()]
    elif capability_id == 'shutdown':
       command = ['shutdown', '/s', '/t', '0'] if os.name == 'nt' else ['systemctl', 'poweroff']
    elif capability_id == 'reboot':

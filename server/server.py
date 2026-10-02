@@ -27,19 +27,17 @@ STANDARD_CAPABILITIES = (
    {'id': 'logout', 'version': '1', 'title': 'Abmelden',
     'description': 'Meldet den aktuellen Benutzer ab.', 'parameters': {}},
 )
-LINBO_CAPABILITIES = (
-   {'id': 'linbo_start', 'version': '2', 'title': 'Betriebssystem starten',
-    'description': 'Startet das Betriebssystem an der angegebenen Position.', 'parameters': {'position': 1}},
-   {'id': 'linbo_sync_start', 'version': '2', 'title': 'Synchronisieren und starten',
-    'description': 'Synchronisiert und startet das Betriebssystem an der angegebenen Position.',
-    'parameters': {'position': 1}},
-   {'id': 'linbo_new_start', 'version': '2', 'title': 'Neu und starten',
-    'description': 'Formatiert, synchronisiert und startet das Betriebssystem an der angegebenen Position.',
-    'parameters': {'position': 1}},
-   {'id': 'linbo_partition', 'version': '1', 'title': 'Partitionieren',
-    'description': 'Partitioniert den Datenträger gemäß start.conf.', 'parameters': {}},
-   {'id': 'linbo_format', 'version': '1', 'title': 'Partitionieren und formatieren',
-    'description': 'Partitioniert und formatiert den Datenträger gemäß start.conf.', 'parameters': {}},
+LINBO_CAPABILITIES = tuple(
+   {'id': 'linbo_%s_%d' % (command, position), 'version': '3',
+    'title': '%s %d' % (title, position),
+    'description': '%s Betriebssystem %d.' % (description, position), 'parameters': {}}
+   for command, title, description in (
+      ('start', 'Starten', 'Startet'),
+      ('sync', 'Synchronisieren', 'Synchronisiert'),
+      ('format', 'Formatieren', 'Formatiert'),
+      ('new', 'Neu', 'Erstellt neu'),
+   )
+   for position in range(1, 4)
 )
 
 core.init_db()
