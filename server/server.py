@@ -177,19 +177,24 @@ def dashboard_data():
       }
       item['info_items'] = [
          {'label': labels.get(key, key.replace('_', ' ').title()), 'value': value}
-         for key, value in item['hardware'].items() if key != 'capabilities'
+         for key, value in item['hardware'].items()
+         if key not in ('capabilities', 'current_user', 'current_users')
       ]
-   platform_labels = {'windows': 'Win', 'linux': 'Lin', 'linbo': 'Lbo'}
+   platform_labels = {'windows': 'WIN', 'linux': 'UBN', 'linbo': 'LBO'}
    for item in devices:
-      same_host = [device for device in devices
-                   if device['hostname'].lower() == item['hostname'].lower() and device.get('platform')]
-      current = max(same_host, key=lambda device: device['last_seen'], default=item)
-      platforms = []
-      for device in same_host:
-         platform = device['platform'].lower()
-         if platform not in [entry['value'] for entry in platforms]:
-            platforms.append({'value': platform, 'label': platform_labels.get(platform, device['platform']),
-                              'current': platform == (current.get('platform') or '').lower()})
+      try:
+         history = json.loads(item.get('platform_history_json') or '[]')
+      except (json.JSONDecodeError, TypeError):
+         history = []
+      current = (item.get('platform') or '').lower()
+      history = [str(platform).lower() for platform in history if platform]
+      if current and current not in history:
+         history.append(current)
+      platforms = [
+         {'value': platform, 'label': platform_labels.get(platform, platform.upper()),
+          'current': platform == current}
+         for platform in ('linbo', 'linux', 'windows') if platform in history
+      ]
       item['platforms'] = platforms
       item['platform_filter'] = ' '.join(entry['value'] for entry in platforms)
    template_tree = []

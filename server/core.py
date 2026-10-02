@@ -32,6 +32,7 @@ def _create_devices_table(conn, table='devices'):
          token_hash TEXT NOT NULL,
          hostname TEXT NOT NULL,
          platform TEXT,
+         platform_history_json TEXT NOT NULL DEFAULT '[]',
          agent_version TEXT,
          hardware_json TEXT,
          logged_in_users_json TEXT,
@@ -50,7 +51,7 @@ def _migrate_devices(conn):
    if not exists:
       return
    columns = {row['name'] for row in conn.execute('PRAGMA table_info(devices)').fetchall()}
-   expected = {'id', 'token_hash', 'hostname', 'platform', 'agent_version', 'hardware_json',
+   expected = {'id', 'token_hash', 'hostname', 'platform', 'platform_history_json', 'agent_version', 'hardware_json',
                'logged_in_users_json', 'stack_generation', 'first_seen', 'last_seen',
                'is_image_source', 'settings_json', 'template_device_id'}
    if columns == expected:
@@ -60,13 +61,16 @@ def _migrate_devices(conn):
    image_source = 'is_image_source' if 'is_image_source' in columns else '0'
    settings = 'settings_json' if 'settings_json' in columns else "'{}'"
    template = 'template_device_id' if 'template_device_id' in columns else "''"
+   platform_history = ('platform_history_json' if 'platform_history_json' in columns else
+                       "CASE WHEN platform IS NULL OR platform='' THEN '[]' "
+                       "ELSE json_array(lower(platform)) END")
    conn.execute(f'''
       INSERT INTO devices_v03(
-         id, token_hash, hostname, platform, agent_version,
+         id, token_hash, hostname, platform, platform_history_json, agent_version,
          hardware_json, logged_in_users_json, stack_generation, first_seen, last_seen,
          is_image_source, settings_json, template_device_id
       )
-      SELECT id, token_hash, hostname, platform, agent_version,
+      SELECT id, token_hash, hostname, platform, {platform_history}, agent_version,
          hardware_json, logged_in_users_json, COALESCE(stack_generation, 0), first_seen, last_seen,
          {image_source}, {settings}, {template}
       FROM devices
@@ -465,7 +469,8 @@ def enroll(payload):
       if not reusable:
          return 403, {'error': 'invalid enrollment token'}
       existing = conn.execute('''
-         SELECT id, hostname, settings_json, template_device_id, is_image_source, token_hash
+         SELECT id, hostname, platform, platform_history_json, settings_json,
+            template_device_id, is_image_source, token_hash
          FROM devices WHERE lower(hostname)=lower(?)
          ''', (hostname,)).fetchone()
       device_id = existing['id'] if existing else secrets.token_hex(8)
@@ -479,23 +484,38 @@ def enroll(payload):
       device_token = secrets.token_urlsafe(32)
       new_token_hash = token_hash(device_token)
       now = now_ts()
+      platform = str(payload.get('platform', '')).lower()
+      try:
+         platform_history = json.loads(existing['platform_history_json'] or '[]') if existing else []
+      except (json.JSONDecodeError, TypeError):
+         platform_history = []
+      platform_history = [str(value).lower() for value in platform_history if value]
+      if existing and existing['platform'] and existing['platform'].lower() not in platform_history:
+         platform_history.append(existing['platform'].lower())
+      if platform and platform not in platform_history:
+         platform_history.append(platform)
+      platform_changed = bool(existing and platform != (existing['platform'] or '').lower())
       conn.execute('''
-         INSERT INTO devices(id, token_hash, hostname, platform, agent_version, first_seen, last_seen, is_image_source, settings_json, template_device_id)
-         VALUES(?,?,?,?,?,?,?,?,?,?)
+         INSERT INTO devices(id, token_hash, hostname, platform, platform_history_json, agent_version,
+            hardware_json, logged_in_users_json, first_seen, last_seen, is_image_source, settings_json, template_device_id)
+         VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET
             token_hash=excluded.token_hash,
             hostname=excluded.hostname,
             platform=excluded.platform,
+            platform_history_json=excluded.platform_history_json,
             agent_version=excluded.agent_version,
+            hardware_json=CASE WHEN ? THEN '{}' ELSE devices.hardware_json END,
+            logged_in_users_json=CASE WHEN ? THEN '[]' ELSE devices.logged_in_users_json END,
             last_seen=excluded.last_seen,
             is_image_source=excluded.is_image_source,
             settings_json=excluded.settings_json,
             template_device_id=excluded.template_device_id
       ''', (
-         device_id, new_token_hash, registered_hostname, payload.get('platform', ''),
-         payload.get('agent_version', ''), now, now,
+         device_id, new_token_hash, registered_hostname, platform,
+         json.dumps(platform_history), payload.get('agent_version', ''), '{}', '[]', now, now,
          int(image_source), settings_json, template_device_id
-      ))
+      ) + (int(platform_changed), int(platform_changed)))
       if reusable:
          if reusable['token_type'] == 'single':
             _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
