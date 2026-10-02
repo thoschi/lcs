@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "0.8.1"
+const version = "0.8.2"
 
 // defaultServer kann beim Bauen mit -ldflags "-X main.defaultServer=..." gesetzt werden.
 var defaultServer string
@@ -101,7 +101,11 @@ func main() {
 			cfg.token = args[1]
 		}
 	} else if cfg.token == "" && len(args) > 0 {
-		cfg.token = args[0]
+		if info, err := os.Stat(args[0]); err == nil && !info.IsDir() {
+			cfg.tokenFile = args[0]
+		} else {
+			cfg.token = args[0]
+		}
 	}
 	if cfg.token == "" && cfg.tokenFile != "" {
 		data, err := os.ReadFile(cfg.tokenFile)

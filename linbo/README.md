@@ -40,10 +40,22 @@ Die Token-Datei entspricht dem vom LCS-Server ausgegebenen Format; der Token
 steht in ihrer ersten Zeile. Da das LINBO-System flüchtig ist, ist weder eine
 interaktive Konsole noch ein Imaging-Schritt erforderlich.
 
+Im LCS-Server wird dafür ein **LINBO-/Mehrfach-Token (ohne Musterclient)** und
+kein Muster-Token angelegt. Das Feld „Hostname“ bleibt leer. Derselbe Token darf
+von mehreren LINBO-Geräten verwendet werden; jedes Gerät wird anhand seines
+eigenen Hostnamens als normaler Client im Inventar geführt.
+
 Der serverseitig konfigurierte LINBO-Startbefehl lautet beispielsweise:
 
 ```bash
 chmod 700 /tmp/lcs-linbo-agent && chmod 600 /tmp/enrollment.token && /tmp/lcs-linbo-agent -token-file /tmp/enrollment.token >>/tmp/lcs-linbo-agent.log 2>&1 &
+```
+
+Bei eingebauter Serveradresse kann die Token-Datei auch direkt als einziges
+Argument angegeben werden:
+
+```bash
+/tmp/lcs-linbo-agent /tmp/enrollment.token
 ```
 
 Wurde die Serveradresse nicht beim Bauen gesetzt, muss sie beim Start ergänzt
@@ -53,5 +65,6 @@ werden:
 /tmp/lcs-linbo-agent -server https://lcs.example -token-file /tmp/enrollment.token >>/tmp/lcs-linbo-agent.log 2>&1 &
 ```
 
-Für wiederholte LINBO-Starts muss ein wiederverwendbarer Enrollment-Token
-verwendet werden. Ein Einmal-Token ist nach dem ersten Enrollment verbraucht.
+Für wiederholte LINBO-Starts muss ein LINBO-/Mehrfach-Token verwendet werden.
+Ein Einmal-Token ist nach dem ersten Enrollment verbraucht; ein Muster-Token
+würde das erste LINBO-Gerät fälschlich als Musterclient einordnen.
