@@ -21,7 +21,16 @@ GOARCH=arm64 ./build-linbo.sh https://lcs.example /srv/linbo/lcs-linbo-agent
 ```
 
 Durch die eingebaute Serveradresse benötigt der gestartete Agent nur noch die
-Token-Datei. Das Build-Skript installiert und startet keinen Dienst.
+Token-Datei. Das Build-Skript bettet außerdem den CA-Vertrauensspeicher des
+Build-Rechners ein, da LINBO selbst keinen vollständigen Zertifikatsspeicher
+bereitstellt. Für eine eigene Zertifizierungsstelle wird deren PEM-Datei beim
+Bauen explizit angegeben:
+
+```bash
+LCS_CA_FILE=/pfad/zur/ca-kette.pem ./build-linbo.sh https://lcs.example
+```
+
+Das Build-Skript installiert und startet keinen Dienst.
 
 ## Manuelle Bereitstellung
 

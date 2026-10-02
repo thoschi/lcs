@@ -3,6 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -24,6 +27,9 @@ const version = "0.8.1"
 
 // defaultServer kann beim Bauen mit -ldflags "-X main.defaultServer=..." gesetzt werden.
 var defaultServer string
+
+// defaultCAPEMBase64 wird vom Build-Skript mit den vertrauenswürdigen CAs gefüllt.
+var defaultCAPEMBase64 string
 
 type config struct {
 	server, token, tokenFile, startConf, wrapper string
@@ -108,8 +114,12 @@ func main() {
 		log.Fatal("-server sowie -token oder -token-file sind erforderlich")
 	}
 	cfg.server = strings.TrimRight(cfg.server, "/")
+	client, err := httpClient()
+	if err != nil {
+		log.Fatalf("TLS-Vertrauensspeicher kann nicht geladen werden: %v", err)
+	}
 	a := &agent{
-		config: cfg, client: &http.Client{Timeout: 30 * time.Second},
+		config: cfg, client: client,
 		queued: make(map[int64]bool), actions: make(chan action, 50),
 	}
 	go a.executeActions()
@@ -124,6 +134,22 @@ func main() {
 			time.Sleep(3 * time.Second)
 		}
 	}
+}
+
+func httpClient() (*http.Client, error) {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if defaultCAPEMBase64 != "" {
+		pem, err := base64.StdEncoding.DecodeString(defaultCAPEMBase64)
+		if err != nil {
+			return nil, fmt.Errorf("eingebaute CA-Daten sind ungültig: %w", err)
+		}
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, errors.New("eingebaute CA-Daten enthalten kein Zertifikat")
+		}
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+	}
+	return &http.Client{Timeout: 30 * time.Second, Transport: transport}, nil
 }
 
 func (a *agent) request(method, path string, payload any, result any) (int, error) {
