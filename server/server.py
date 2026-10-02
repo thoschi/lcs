@@ -322,6 +322,7 @@ def agent_api(endpoint):
                                                          payload.get('hostname', '')),
       'token/check': lambda: core.check_enrollment_token(payload.get('token_hash', ''), payload.get('checksum', '')),
       'heartbeat': lambda: core.heartbeat(device_id, bearer(), payload),
+      'action/ack': lambda: core.acknowledge_actions(device_id, bearer(), payload),
       'action/result': lambda: core.action_result(device_id, bearer(), payload),
       'event': lambda: core.device_event(device_id, bearer(), payload),
       'reset-token': lambda: core.reset_token(device_id, bearer(), payload.get('checksum', '')),

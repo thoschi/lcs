@@ -214,6 +214,10 @@ def init_db():
          conn.execute("ALTER TABLE actions ADD COLUMN username TEXT NOT NULL DEFAULT ''")
       if 'execution_device_id' not in action_columns:
          conn.execute("ALTER TABLE actions ADD COLUMN execution_device_id TEXT NOT NULL DEFAULT ''")
+      # Frühere Versionen bezeichneten bereits ausgelieferte Systemaufträge als
+      # "running". Sie dürfen nach dem Upgrade keinesfalls erneut zugestellt werden.
+      conn.execute("UPDATE actions SET status='transmitted', lease_until=NULL "
+                   "WHERE scope='system' AND status='running'")
       token_columns = {row['name'] for row in conn.execute('PRAGMA table_info(enrollment_tokens)').fetchall()}
       if 'hostname' not in token_columns:
          conn.execute("ALTER TABLE enrollment_tokens ADD COLUMN hostname TEXT NOT NULL DEFAULT ''")
@@ -722,34 +726,48 @@ def poll_actions(device_id, token):
       return 401, {'error': 'unauthorized'}
    now = now_ts()
    horizon = now + ACTION_PREFETCH
-   lease = now + ACTION_LEASE
    with db() as conn:
-      conn.execute('''UPDATE actions SET status='failed', finished_at=?, lease_until=NULL,
-         result_json=? WHERE scope='system' AND status='running' AND COALESCE(lease_until,0)<?''',
-         (now, json.dumps({'error': 'Keine Abschlussmeldung innerhalb der Ausführungsfrist'},
-                          ensure_ascii=False), now))
       rows = conn.execute('''
          SELECT a.* FROM actions a JOIN devices target ON target.id=a.device_id
          WHERE lower(target.hostname)=lower(?) AND a.scope='system' AND a.run_at<=? AND (
-            status='queued' AND (a.execution_device_id='' OR a.execution_device_id=?)
+            status='queued'
          ) ORDER BY run_at, a.id LIMIT 50
-      ''', (device['hostname'], horizon, device['id'])).fetchall()
-      result = []
-      for row in rows:
-         claimed = conn.execute('''UPDATE actions SET status='running', lease_until=?,
-            started_at=COALESCE(started_at, ?), execution_device_id=? WHERE id=? AND
-            status='queued' AND (execution_device_id='' OR execution_device_id=?)''',
-            (max(lease, row['run_at'] + ACTION_LEASE), now, device['id'], row['id'],
-             device['id']))
-         if not claimed.rowcount:
-            continue
-         result.append({
+      ''', (device['hostname'], horizon)).fetchall()
+      result = [{
             'id': row['id'],
             'capability_id': row['capability_id'],
             'parameters': json.loads(row['parameters_json'] or '{}'),
             'run_at': row['run_at'],
-         })
+         } for row in rows]
    return 200, {'actions': result}
+
+
+def acknowledge_actions(device_id, token, payload):
+   device = authenticate_device(device_id, token)
+   if not device:
+      return 401, {'error': 'unauthorized'}
+   values = payload.get('action_ids', [])
+   if not isinstance(values, list):
+      return 400, {'error': 'action_ids must be a list'}
+   action_ids = {int(value) for value in values if str(value).isdigit()}
+   acknowledged = []
+   now = now_ts()
+   with db() as conn:
+      for action_id in sorted(action_ids):
+         row = conn.execute('''SELECT a.status, a.execution_device_id FROM actions a
+            JOIN devices target ON target.id=a.device_id
+            WHERE a.id=? AND a.scope='system' AND lower(target.hostname)=lower(?)''',
+            (action_id, device['hostname'])).fetchone()
+         if not row:
+            continue
+         if row['status'] == 'queued':
+            conn.execute('''UPDATE actions SET status='transmitted', started_at=COALESCE(started_at,?),
+               execution_device_id=?, lease_until=NULL WHERE id=? AND status='queued' ''',
+               (now, device['id'], action_id))
+            acknowledged.append(action_id)
+         elif row['status'] == 'transmitted' and row['execution_device_id'] == device['id']:
+            acknowledged.append(action_id)
+   return 200, {'ok': True, 'action_ids': acknowledged}
 
 
 def action_result(device_id, token, payload):
@@ -766,6 +784,8 @@ def action_result(device_id, token, payload):
          (action_id, device['hostname'], device['id'])).fetchone()
       if not row:
          return 404, {'error': 'action not found'}
+      if row['status'] not in ('transmitted', 'done', 'failed'):
+         return 409, {'error': 'action was not acknowledged by client'}
       conn.execute('UPDATE actions SET status=?, finished_at=?, lease_until=NULL, result_json=? WHERE id=?',
                    (status, now_ts(), json.dumps(result, ensure_ascii=False), action_id))
       client_info = result.get('client_info') if isinstance(result, dict) else None

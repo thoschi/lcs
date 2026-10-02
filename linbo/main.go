@@ -20,7 +20,7 @@ import (
 	"time"
 )
 
-const version = "0.8.0"
+const version = "0.8.1"
 
 // defaultServer kann beim Bauen mit -ldflags "-X main.defaultServer=..." gesetzt werden.
 var defaultServer string
@@ -288,7 +288,26 @@ func (a *agent) pollActions() error {
 	if err != nil {
 		return err
 	}
+	ids := make([]int64, 0, len(response.Actions))
 	for _, item := range response.Actions {
+		ids = append(ids, item.ID)
+	}
+	var acknowledged struct {
+		ActionIDs []int64 `json:"action_ids"`
+	}
+	if len(ids) > 0 {
+		if _, err := a.request(http.MethodPost, "/api/v1/action/ack", map[string]any{"action_ids": ids}, &acknowledged); err != nil {
+			return err
+		}
+	}
+	accepted := make(map[int64]bool, len(acknowledged.ActionIDs))
+	for _, id := range acknowledged.ActionIDs {
+		accepted[id] = true
+	}
+	for _, item := range response.Actions {
+		if !accepted[item.ID] {
+			continue
+		}
 		a.mu.Lock()
 		known := a.queued[item.ID]
 		if !known {
@@ -307,8 +326,17 @@ func (a *agent) executeActions() {
 		if delay := time.Until(time.Unix(item.RunAt, 0)); delay > 0 {
 			time.Sleep(delay)
 		}
-		message, err := a.execute(item)
-		a.report(item.ID, message, err)
+		if item.CapabilityID == "shutdown" || item.CapabilityID == "reboot" {
+			for a.report(item.ID, item.CapabilityID+" lokal zur Ausführung angenommen", nil) != nil {
+				time.Sleep(3 * time.Second)
+			}
+			a.execute(item)
+		} else {
+			message, err := a.execute(item)
+			for a.report(item.ID, message, err) != nil {
+				time.Sleep(3 * time.Second)
+			}
+		}
 		a.mu.Lock()
 		delete(a.queued, item.ID)
 		a.mu.Unlock()
@@ -379,7 +407,7 @@ func parsePosition(raw json.RawMessage) (int, error) {
 	return strconv.Atoi(text)
 }
 
-func (a *agent) report(id int64, message string, actionErr error) {
+func (a *agent) report(id int64, message string, actionErr error) error {
 	result := map[string]any{"message": message}
 	if actionErr != nil {
 		result["error"] = actionErr.Error()
@@ -387,5 +415,7 @@ func (a *agent) report(id int64, message string, actionErr error) {
 	payload := map[string]any{"action_id": id, "ok": actionErr == nil, "result": result}
 	if _, err := a.request(http.MethodPost, "/api/v1/action/result", payload, nil); err != nil {
 		log.Printf("Ergebnis für Aktion %d konnte nicht gemeldet werden: %v", id, err)
+		return err
 	}
+	return nil
 }

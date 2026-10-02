@@ -616,6 +616,7 @@ def flush_events(config, state, state_dir):
 def save_action_result(state_dir, payload):
    path = Path(state_dir) / 'result-outbox.json'
    items = load_json(path, [])
+   items = [item for item in items if item.get('action_id') != payload.get('action_id')]
    items.append(payload)
    save_json(path, items, 0o600)
 
@@ -626,14 +627,14 @@ def flush_action_results(config, state, state_dir):
    if not items:
       return
    remaining = []
-   for payload in items:
+   for index, payload in enumerate(items):
       try:
          status, _ = post_device(config, state, '/api/v1/action/result', payload)
          if status != 200:
             remaining.append(payload)
       except Exception:
          remaining.append(payload)
-         remaining.extend(items[items.index(payload) + 1:])
+         remaining.extend(items[index + 1:])
          break
    save_json(path, remaining, 0o600)
 
@@ -647,10 +648,21 @@ def poll_manual_actions(config, state, stack, state_dir):
    if status != 200:
       return status
    for action in response.get('actions', []):
+      action['transmitted'] = pending.get(str(action['id']), {}).get('transmitted', False)
       pending[str(action['id'])] = action
       log('Manuelle Aktion empfangen', action_id=action['id'], capability_id=action['capability_id'],
           run_at=action.get('run_at', 0))
    save_json(pending_path, list(pending.values()), 0o600)
+   awaiting_ack = [item['id'] for item in pending.values() if not item.get('transmitted')]
+   if awaiting_ack:
+      status, response = post_device(config, state, '/api/v1/action/ack', {'action_ids': awaiting_ack})
+      if status != 200:
+         return status
+      acknowledged = {str(action_id) for action_id in response.get('action_ids', [])}
+      for key in acknowledged:
+         if key in pending:
+            pending[key]['transmitted'] = True
+      save_json(pending_path, list(pending.values()), 0o600)
    return status
 
 
@@ -659,11 +671,10 @@ def execute_due_actions(config, state, stack, state_dir):
    pending = {str(item['id']): item for item in load_json(pending_path, [])}
    capabilities = {item['id']: item for item in public_capabilities()}
    now = int(time.time())
-   completed = []
    executor = stack['system_executor']
    running = stack.setdefault('running_actions', {})
    for key, action in list(pending.items()):
-      if int(action.get('run_at', 0)) > now:
+      if not action.get('transmitted') or int(action.get('run_at', 0)) > now:
          continue
       action_id = action['id']
       cap_id = action['capability_id']
@@ -685,9 +696,24 @@ def execute_due_actions(config, state, stack, state_dir):
       cap = capabilities.get(cap_id)
       if not cap:
          outcome = {'ok': False, 'error': 'system capability not available locally: ' + cap_id}
-      elif key not in running:
+      elif cap_id in ('shutdown', 'reboot'):
+         # Die lokale Annahme ist vor dem Zustandswechsel dauerhaft abgeschlossen.
+         payload = {'action_id': action_id, 'ok': True,
+                    'result': {'message': cap_id + ' lokal zur Ausführung angenommen'}}
+         save_action_result(state_dir, payload)
+         pending.pop(key, None)
+         save_json(pending_path, list(pending.values()), 0o600)
          running[key] = executor.submit(action)
+         log('Aktion lokal abgeschlossen', action_id=action_id, capability_id=cap_id)
          continue
+      elif key not in running:
+         if action.get('execution_started'):
+            outcome = {'ok': False, 'error': 'Client wurde während der Ausführung neu gestartet; Auftrag wird nicht wiederholt.'}
+         else:
+            action['execution_started'] = True
+            save_json(pending_path, list(pending.values()), 0o600)
+            running[key] = executor.submit(action)
+            continue
       else:
          outcome = executor.take(running[key])
          if outcome is None:
@@ -696,18 +722,10 @@ def execute_due_actions(config, state, stack, state_dir):
       ok = outcome.get('ok', False)
       result = outcome.get('result', {'error': outcome.get('error', 'Aktion fehlgeschlagen.')})
       payload = {'action_id': action_id, 'ok': ok, 'result': result}
-      try:
-         status, _ = post_device(config, state, '/api/v1/action/result', payload)
-         if status != 200:
-            save_action_result(state_dir, payload)
-      except Exception:
-         save_action_result(state_dir, payload)
-      completed.append(key)
-      log('Aktion abgeschlossen', action_id=action_id, capability_id=cap_id, ok=ok)
-   for key in completed:
+      save_action_result(state_dir, payload)
       pending.pop(key, None)
-   if completed:
       save_json(pending_path, list(pending.values()), 0o600)
+      log('Aktion abgeschlossen', action_id=action_id, capability_id=cap_id, ok=ok)
 
 
 def reset_device(config, state, reenrollment_token=''):

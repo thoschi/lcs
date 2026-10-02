@@ -311,7 +311,7 @@
       let visible = 0;
       actionRows().forEach(row => {
          const status = row.dataset.actionStatus;
-         const stateMatches = !active || (active === 'open' ? ['queued', 'running'].includes(status)
+         const stateMatches = !active || (active === 'open' ? ['queued', 'transmitted', 'running'].includes(status)
             : active === 'finished' ? status === 'done' : status === active);
          row.hidden = !stateMatches || !(row.dataset.actionSearch || row.textContent.toLocaleLowerCase('de-DE')).includes(term);
          if (!row.hidden) visible += 1;
