@@ -257,7 +257,12 @@
          if (!row) {
             row = document.createElement('tr');
             row.dataset.actionId = action.id;
-            for (let index = 0; index < 8; index += 1) row.appendChild(document.createElement('td'));
+            for (let index = 0; index < 9; index += 1) row.appendChild(document.createElement('td'));
+            const selection = document.createElement('input');
+            selection.className = 'action-select';
+            selection.type = 'checkbox';
+            selection.setAttribute('aria-label', `Auftrag #${action.id} auswählen`);
+            row.cells[0].appendChild(selection);
             actionBody.prepend(row);
          }
          const actionState = JSON.stringify(action);
@@ -266,19 +271,19 @@
          row.dataset.actionStatus = action.status;
          row.dataset.actionSearch = `${action.id} ${action.hostname} ${action.capability_id} ${action.status}`.toLocaleLowerCase('de-DE');
          const cells = row.cells;
-         cells[0].textContent = `#${action.id}`;
-         cells[1].textContent = action.hostname;
-         cells[2].textContent = action.capability_id;
-         cells[3].replaceChildren();
+         cells[1].textContent = `#${action.id}`;
+         cells[2].textContent = action.hostname;
+         cells[3].textContent = action.capability_id;
+         cells[4].replaceChildren();
          const status = document.createElement('span');
          status.className = `pill ${action.status === 'done' ? 'good' : action.status === 'failed' ? 'bad' : ''}`.trim();
          status.textContent = action.status;
-         cells[3].appendChild(status);
-         cells[4].textContent = formatTime(action.run_at);
-         cells[5].textContent = formatTime(action.finished_at);
-         setActionResult(cells[6], action.result);
-         cells[7].innerHTML = `<form method="post" action="/admin/action/${action.id}/delete" onsubmit="return confirm('Auftrag #${action.id} endgültig löschen?')"><input type="hidden" name="csrf"><button class="danger">Löschen</button></form>`;
-         cells[7].querySelector('[name=csrf]').value = document.querySelector('input[name=csrf]')?.value || '';
+         cells[4].appendChild(status);
+         cells[5].textContent = formatTime(action.run_at);
+         cells[6].textContent = formatTime(action.finished_at);
+         setActionResult(cells[7], action.result);
+         cells[8].innerHTML = `<form method="post" action="/admin/action/${action.id}/delete" onsubmit="return confirm('Auftrag #${action.id} endgültig löschen?')"><input type="hidden" name="csrf"><button class="danger">Löschen</button></form>`;
+         cells[8].querySelector('[name=csrf]').value = document.querySelector('#action-table').dataset.csrf;
          row.title = action.execution_device_id
             ? `Übertragen/ausgeführt über ${action.execution_platform || 'unbekanntes Betriebssystem'} (Token ${action.execution_device_id})`
             : 'Noch an keinen Token übertragen';
@@ -290,12 +295,21 @@
    };
 
    const actionSearch = document.querySelector('#action-search');
+   const actionSelectionToggle = document.querySelector('#select-filtered-actions');
+   const deleteActionsForm = document.querySelector('#delete-actions-form');
+   const actionRows = () => [...document.querySelectorAll('#action-table tbody tr[data-action-id]')];
+   const updateActionSelection = () => {
+      const visible = actionRows().filter(row => !row.hidden);
+      const selectedVisible = visible.filter(row => row.querySelector('.action-select').checked).length;
+      actionSelectionToggle.checked = visible.length > 0 && selectedVisible === visible.length;
+      actionSelectionToggle.indeterminate = selectedVisible > 0 && selectedVisible < visible.length;
+      deleteActionsForm.querySelector('button').disabled = !actionRows().some(row => row.querySelector('.action-select').checked);
+   };
    const applyActionView = () => {
-      const actionRows = [...document.querySelectorAll('#action-table tbody tr[data-action-id]')];
       const term = (actionSearch?.value || '').trim().toLocaleLowerCase('de-DE');
       const active = document.querySelector('[data-action-filter] button.active')?.dataset.value || '';
       let visible = 0;
-      actionRows.forEach(row => {
+      actionRows().forEach(row => {
          const status = row.dataset.actionStatus;
          const stateMatches = !active || (active === 'open' ? ['queued', 'running'].includes(status)
             : active === 'finished' ? status === 'done' : status === active);
@@ -303,7 +317,8 @@
          if (!row.hidden) visible += 1;
       });
       const result = document.querySelector('#action-result-count');
-      if (result) result.textContent = `${visible} von ${actionRows.length} Aufträgen`;
+      if (result) result.textContent = `${visible} von ${actionRows().length} Aufträgen`;
+      if (actionSelectionToggle) updateActionSelection();
    };
    actionSearch?.addEventListener('input', applyActionView);
    document.querySelector('[data-action-filter]')?.addEventListener('click', event => {
@@ -311,6 +326,30 @@
       if (!button) return;
       event.currentTarget.querySelectorAll('button').forEach(item => item.classList.toggle('active', item === button));
       applyActionView();
+   });
+   actionSelectionToggle?.addEventListener('change', () => {
+      actionRows().filter(row => !row.hidden).forEach(row => {
+         row.querySelector('.action-select').checked = actionSelectionToggle.checked;
+      });
+      updateActionSelection();
+   });
+   document.querySelector('#action-table tbody')?.addEventListener('change', event => {
+      if (event.target.matches('.action-select')) updateActionSelection();
+   });
+   deleteActionsForm?.addEventListener('submit', event => {
+      const selected = actionRows().filter(row => row.querySelector('.action-select').checked);
+      if (!selected.length || !confirm(`${selected.length} Auftrag/Aufträge endgültig löschen?`)) {
+         event.preventDefault();
+         return;
+      }
+      deleteActionsForm.querySelectorAll('[name="action_ids"]').forEach(input => input.remove());
+      selected.forEach(row => {
+         const input = document.createElement('input');
+         input.type = 'hidden';
+         input.name = 'action_ids';
+         input.value = row.dataset.actionId;
+         deleteActionsForm.appendChild(input);
+      });
    });
    applyActionView();
    document.querySelector('#new-action-modal form.modal-form')?.addEventListener('submit', event => {
