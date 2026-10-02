@@ -30,8 +30,6 @@ NO_USER=0
 LCS_SERVER_ENV="${LCS_SERVER_ENV:-$LCS_SERVER_ROOT/server.env}"
 LCS_CLIENT_ENV="${LCS_CLIENT_ENV:-$LCS_SERVICE_ROOT/client.env}"
 LCS_ENROLLMENT_TOKEN="${LCS_ENROLLMENT_TOKEN:-$LCS_SERVICE_ROOT/enrollment.token}"
-LCS_LINBO_ROOT="${LCS_LINBO_ROOT:-/opt/lcs-linbo}"
-LCS_LINBO_SERVER_ROOT="${LCS_LINBO_SERVER_ROOT:-/opt/lcs-linbo-server}"
 
 if [ "$(id -u)" -ne 0 ]; then
    echo "Bitte als root ausführen." >&2
@@ -50,8 +48,6 @@ Aufruf:
   $0 uninstall [server|service|client|workstation|all]
   $0 all https://clients.example
   $0 reset-identity
-  $0 install linbo https://clients.example --token-file /pfad/zur/token-datei
-  $0 install linbo-server
 
 install        Erstinstallation; fordert bei Bedarf das Image-Passwort an
 upgrade        Laufzeit aktualisieren, Identität und Token unverändert lassen
@@ -93,7 +89,7 @@ if [ -z "$MODE" ]; then
 fi
 
 case "$MODE" in
-   service|system|client|workstation|all|linbo)
+   service|system|client|workstation|all)
       if [ $# -gt 0 ] && [[ "$1" != --* ]]; then
          SERVER_URL="$1"
          shift
@@ -122,11 +118,7 @@ done
 
 ensure_server_url() {
    if [ -z "$SERVER_URL" ] && [ "$OPERATION" = upgrade ]; then
-      if [ "$MODE" = linbo ]; then
-         SERVER_URL="$(read_env_value "$LCS_LINBO_ROOT/client.env" LCS_SERVER)"
-      else
-         SERVER_URL="$(read_env_value "$LCS_CLIENT_ENV" LCS_SERVER)"
-      fi
+      SERVER_URL="$(read_env_value "$LCS_CLIENT_ENV" LCS_SERVER)"
    fi
    if [ -z "$SERVER_URL" ]; then
       echo "Für $MODE fehlt die Server-URL." >&2
@@ -622,46 +614,6 @@ reset_identity() {
    echo "Der Dienst bleibt enabled, ist aber bis zum nächsten Start gestoppt."
 }
 
-install_linbo() {
-   ensure_server_url
-   systemctl disable --now lcs-linbo.service 2>/dev/null || true
-   [ "$OPERATION" = upgrade ] || rm -rf "$LCS_LINBO_ROOT"
-   mkdir -p "$LCS_LINBO_ROOT"
-   rm -rf "$LCS_LINBO_ROOT/system" "$LCS_LINBO_ROOT/linbo"
-   cp -a "$SOURCE_ROOT/system" "$SOURCE_ROOT/linbo" "$LCS_LINBO_ROOT/"
-   python3 -m venv "$LCS_LINBO_ROOT/venv"
-   if [ "$OPERATION" != upgrade ] || [ ! -s "$LCS_LINBO_ROOT/enrollment.token" ]; then
-      [ -n "$TOKEN_SOURCE" ] && copy_token "$TOKEN_SOURCE" "$LCS_LINBO_ROOT/enrollment.token" || {
-         echo "LINBO benötigt --token-file." >&2; exit 1;
-      }
-   fi
-   if [ "$OPERATION" != upgrade ] || [ ! -f "$LCS_LINBO_ROOT/client.env" ]; then cat > "$LCS_LINBO_ROOT/client.env" <<EOF2
-LCS_SERVER=$SERVER_URL
-LCS_STATE_ROOT=$LCS_LINBO_ROOT/state
-LCS_FEATURE_ROOT=$LCS_LINBO_ROOT/features
-LCS_TOKEN_FILE=$LCS_LINBO_ROOT/enrollment.token
-EOF2
-   fi
-   sed "s|__ROOT__|$LCS_LINBO_ROOT|g" "$SOURCE_ROOT/linbo/lcs-linbo.service.in" > "$LCS_SYSTEMD_ROOT/lcs-linbo.service"
-   systemctl daemon-reload
-   systemctl enable --now lcs-linbo.service
-}
-
-install_linbo_server() {
-   systemctl disable --now lcs-linbo-server.service 2>/dev/null || true
-   [ "$OPERATION" = upgrade ] || rm -rf "$LCS_LINBO_SERVER_ROOT"
-   mkdir -p "$LCS_LINBO_SERVER_ROOT"
-   cp "$SOURCE_ROOT/linbo/server_service.py" "$LCS_LINBO_SERVER_ROOT/"
-   python3 -m venv "$LCS_LINBO_SERVER_ROOT/venv"
-   if [ ! -f "$LCS_LINBO_SERVER_ROOT/linbo-server.env" ]; then
-      printf 'LCS_LINBO_SERVER_TOKEN=%s\n' "$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')" > "$LCS_LINBO_SERVER_ROOT/linbo-server.env"
-      chmod 600 "$LCS_LINBO_SERVER_ROOT/linbo-server.env"
-   fi
-   sed "s|__ROOT__|$LCS_LINBO_SERVER_ROOT|g" "$SOURCE_ROOT/linbo/lcs-linbo-server.service.in" > "$LCS_SYSTEMD_ROOT/lcs-linbo-server.service"
-   systemctl daemon-reload
-   systemctl enable --now lcs-linbo-server.service
-}
-
 uninstall_client() {
    pkill -f "$LCS_CLIENT_ROOT/user_client.py" 2>/dev/null || true
    pkill -f "$LCS_CLIENT_ROOT/user_service.py" 2>/dev/null || true
@@ -690,28 +642,12 @@ uninstall_server() {
    echo "LCS-Server einschließlich seiner Daten entfernt."
 }
 
-uninstall_linbo() {
-   systemctl disable --now lcs-linbo.service 2>/dev/null || true
-   rm -f "$LCS_SYSTEMD_ROOT/lcs-linbo.service"
-   rm -rf "$LCS_LINBO_ROOT"
-   systemctl daemon-reload
-}
-
-uninstall_linbo_server() {
-   systemctl disable --now lcs-linbo-server.service 2>/dev/null || true
-   rm -f "$LCS_SYSTEMD_ROOT/lcs-linbo-server.service"
-   rm -rf "$LCS_LINBO_SERVER_ROOT"
-   systemctl daemon-reload
-}
-
 uninstall_product() {
    case "$MODE" in
       client) uninstall_client ;;
       service|system) uninstall_service ;;
       workstation) uninstall_client; uninstall_service ;;
       server) uninstall_server ;;
-      linbo) uninstall_linbo ;;
-      linbo-server) uninstall_linbo_server ;;
       all) uninstall_client; uninstall_service; uninstall_server ;;
       *) echo "Unbekanntes Uninstall-Ziel: $MODE" >&2; usage; exit 2 ;;
    esac
@@ -752,8 +688,6 @@ case "$MODE" in
          install_client
       fi
       ;;
-   linbo) install_linbo ;;
-   linbo-server) install_linbo_server ;;
    reset-identity)
       reset_identity
       ;;

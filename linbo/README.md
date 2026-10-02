@@ -5,15 +5,23 @@ dadurch weder Go noch Python, eine Shell-Installation oder ein Userclient nötig
 
 ## Bauen
 
-Auf einem Rechner mit Go ab Version 1.20 im Verzeichnis `linbo` ausführen:
+Auf einem Rechner mit Go ab Version 1.20 im Wurzelverzeichnis ausführen:
 
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.defaultServer=https://lcs.example" -o lcs-linbo-agent .
+./build-linbo.sh https://lcs.example
 ```
 
 `https://lcs.example` ist durch die Adresse des LCS-Servers zu ersetzen. Für
-eine andere Clientarchitektur wird `GOARCH` entsprechend angepasst. Durch die
-eingebaute Serveradresse benötigt der gestartete Agent nur noch die Token-Datei.
+eine andere Clientarchitektur wird `GOARCH` entsprechend gesetzt. Standardmäßig
+liegt das Ergebnis unter `build/lcs-linbo-agent`. Ein abweichender Ablageort kann
+als zweites Argument angegeben werden:
+
+```bash
+GOARCH=arm64 ./build-linbo.sh https://lcs.example /srv/linbo/lcs-linbo-agent
+```
+
+Durch die eingebaute Serveradresse benötigt der gestartete Agent nur noch die
+Token-Datei. Das Build-Skript installiert und startet keinen Dienst.
 
 ## Manuelle Bereitstellung
 

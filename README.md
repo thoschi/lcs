@@ -48,12 +48,10 @@ Windows (administrative PowerShell):
 .\install.ps1 install workstation https://lcs.example
 ```
 
-LINBO-Client und der optionale Dienst auf dem LINBO-Server werden unter Linux
-separat installiert:
+Der LINBO-Agent wird nicht installiert, sondern als statische Binärdatei gebaut:
 
 ```bash
-./install.sh install linbo https://lcs.example --token-file ./enrollment.token
-./install.sh install linbo-server
+./build-linbo.sh https://lcs.example /pfad/zur/ablage/lcs-linbo-agent
 ```
 
 `upgrade` ersetzt dabei nur Programmcode; State, Enrollment-Token und `.env`
