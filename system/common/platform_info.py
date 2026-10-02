@@ -85,8 +85,6 @@ def system_information(service_version, users=None):
       'ip_addresses': addresses,
       'os': os_version,
       'exam_mode': exam_mode,
-      'current_users': users,
-      'current_user': ', '.join(users) if users else 'niemand angemeldet',
       'serial_number': serial,
       'architecture': platform.machine(),
    }

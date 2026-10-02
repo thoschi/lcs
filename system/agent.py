@@ -546,11 +546,7 @@ def heartbeat(config, state, stack, inventory):
       inventory['updated_at'] = now
    information = dict(inventory['information'])
    capabilities = public_capabilities()
-   information.update({
-      'capabilities': capabilities,
-      'current_users': users,
-      'current_user': ', '.join(users) if users else 'niemand angemeldet',
-   })
+   information['capabilities'] = capabilities
    payload = {
       'agent_version': VERSION,
       'hostname': hostname(),

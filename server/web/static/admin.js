@@ -390,7 +390,8 @@
                }
                const platformCell = row.querySelector('[data-field="platform"]');
                platformCell.replaceChildren(...device.platforms.flatMap((platform, index) => {
-                  const label = document.createElement(platform.current ? 'strong' : 'span');
+                  const label = document.createElement('span');
+                  label.className = `platform-badge platform-${platform.value}${platform.current ? ' current' : ''}`;
                   label.textContent = platform.label;
                   return index ? [document.createTextNode(' '), label] : [label];
                }));
