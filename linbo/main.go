@@ -23,7 +23,7 @@ import (
 	"time"
 )
 
-const version = "0.8.2"
+const version = "0.8.3"
 
 // defaultServer kann beim Bauen mit -ldflags "-X main.defaultServer=..." gesetzt werden.
 var defaultServer string
@@ -325,26 +325,7 @@ func (a *agent) pollActions() error {
 	if err != nil {
 		return err
 	}
-	ids := make([]int64, 0, len(response.Actions))
 	for _, item := range response.Actions {
-		ids = append(ids, item.ID)
-	}
-	var acknowledged struct {
-		ActionIDs []int64 `json:"action_ids"`
-	}
-	if len(ids) > 0 {
-		if _, err := a.request(http.MethodPost, "/api/v1/action/ack", map[string]any{"action_ids": ids}, &acknowledged); err != nil {
-			return err
-		}
-	}
-	accepted := make(map[int64]bool, len(acknowledged.ActionIDs))
-	for _, id := range acknowledged.ActionIDs {
-		accepted[id] = true
-	}
-	for _, item := range response.Actions {
-		if !accepted[item.ID] {
-			continue
-		}
 		a.mu.Lock()
 		known := a.queued[item.ID]
 		if !known {
@@ -363,14 +344,26 @@ func (a *agent) executeActions() {
 		if delay := time.Until(time.Unix(item.RunAt, 0)); delay > 0 {
 			time.Sleep(delay)
 		}
-		if item.CapabilityID == "shutdown" || item.CapabilityID == "reboot" {
-			for a.report(item.ID, item.CapabilityID+" lokal zur Ausführung angenommen", nil) != nil {
-				time.Sleep(3 * time.Second)
+		accepted := false
+		for {
+			var err error
+			accepted, err = a.acknowledge(item.ID)
+			if err == nil {
+				break
 			}
-			a.execute(item)
-		} else {
-			message, err := a.execute(item)
-			for a.report(item.ID, message, err) != nil {
+			log.Printf("Aktion %d konnte nicht bestätigt werden: %v", item.ID, err)
+			time.Sleep(3 * time.Second)
+		}
+		if accepted {
+			message, err := a.execute(item, func() {
+				for a.report(item.ID, item.CapabilityID+" lokal an "+a.wrapper+" übergeben", nil) != nil {
+					time.Sleep(3 * time.Second)
+				}
+			})
+			for err != nil || strings.TrimSpace(message) != "" {
+				if a.report(item.ID, message, err) == nil {
+					break
+				}
 				time.Sleep(3 * time.Second)
 			}
 		}
@@ -380,7 +373,23 @@ func (a *agent) executeActions() {
 	}
 }
 
-func (a *agent) execute(item action) (string, error) {
+func (a *agent) acknowledge(id int64) (bool, error) {
+	var response struct {
+		ActionIDs []int64 `json:"action_ids"`
+	}
+	_, err := a.request(http.MethodPost, "/api/v1/action/ack", map[string]any{"action_ids": []int64{id}}, &response)
+	if err != nil {
+		return false, err
+	}
+	for _, accepted := range response.ActionIDs {
+		if accepted == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (a *agent) execute(item action, started func()) (string, error) {
 	commands := []string{}
 	switch item.CapabilityID {
 	case "shutdown":
@@ -401,8 +410,15 @@ func (a *agent) execute(item action) (string, error) {
 		}
 		commands = []string{parts[1] + ":" + strconv.Itoa(position)}
 	}
-	output, err := exec.Command(a.wrapper, commands...).CombinedOutput()
-	message := string(output)
+	var output bytes.Buffer
+	command := exec.Command(a.wrapper, commands...)
+	command.Stdout, command.Stderr = &output, &output
+	if err := command.Start(); err != nil {
+		return err.Error(), err
+	}
+	started()
+	err := command.Wait()
+	message := output.String()
 	if len(message) > 4096 {
 		message = message[len(message)-4096:]
 	}
