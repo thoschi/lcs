@@ -384,7 +384,8 @@
                const previousView = [row.dataset.status, row.dataset.hostname, row.dataset.platform, row.dataset.agent].join('\n');
                const status = row.querySelector('[data-field="status"]');
                status.querySelector('.dot').classList.toggle('online', device.online);
-               status.querySelector('span:last-child').textContent = device.online ? 'online' : 'offline';
+               status.querySelector('[data-online-state]').textContent = device.online ? 'online' : 'offline';
+               status.querySelector('[data-exam-state]').hidden = !device.exam_mode;
                for (const [field, value] of Object.entries({hostname: device.hostname, agent: device.agent_version, last_seen: device.last_seen_text})) {
                   row.querySelector(`[data-field="${field}"]`).textContent = value || '–';
                }

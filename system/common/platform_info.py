@@ -55,6 +55,13 @@ def _windows_value(command):
    return _cmd(['powershell', '-NoProfile', '-NonInteractive', '-Command', command])
 
 
+def exam_mode():
+   """Return whether the local Squid service marks this system as an exam client."""
+   if os.name == 'nt':
+      return 'RUNNING' in _cmd(['sc.exe', 'query', 'squid'])
+   return _cmd(['systemctl', 'is-active', 'squid']) == 'active'
+
+
 def system_information(service_version, users=None):
    """Collect only bounded, local inventory calls suitable for every heartbeat."""
    addresses = []
@@ -68,14 +75,12 @@ def system_information(service_version, users=None):
    if os.name == 'nt':
       os_version = _windows_value('(Get-CimInstance Win32_OperatingSystem).Caption + " " + (Get-CimInstance Win32_OperatingSystem).Version') or platform.platform()
       serial = _windows_value('(Get-CimInstance Win32_BIOS).SerialNumber')
-      exam_mode = bool(_cmd(['sc.exe', 'query', 'squid'])) and 'RUNNING' in _cmd(['sc.exe', 'query', 'squid'])
    else:
       os_version = _linux_os()
       try:
          serial = Path('/sys/class/dmi/id/product_serial').read_text(encoding='utf-8').strip()
       except OSError:
          serial = ''
-      exam_mode = _cmd(['systemctl', 'is-active', 'squid']) == 'active'
    users = logged_in_users() if users is None else users
    return {
       'service_version': service_version,
@@ -84,7 +89,7 @@ def system_information(service_version, users=None):
       'mac': mac,
       'ip_addresses': addresses,
       'os': os_version,
-      'exam_mode': exam_mode,
+      'exam_mode': exam_mode(),
       'serial_number': serial,
       'architecture': platform.machine(),
    }
