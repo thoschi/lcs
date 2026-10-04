@@ -194,9 +194,9 @@ def dashboard_data():
                     for platform, last_seen in history.items() if platform}
       if current:
          history[current] = item['last_seen']
-      platforms = [] if not item['online'] else [
+      platforms = [
          {'value': platform, 'label': platform_labels.get(platform, platform.upper()),
-          'current': platform == current, 'last_seen': history[platform],
+          'current': item['online'] and platform == current, 'last_seen': history[platform],
           'last_seen_text': format_datetime(history[platform])}
          for platform in ('linbo', 'linux', 'windows') if platform in history
       ]
