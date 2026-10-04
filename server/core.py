@@ -469,7 +469,7 @@ def enroll(payload):
       if not reusable:
          return 403, {'error': 'invalid enrollment token'}
       existing = conn.execute('''
-         SELECT id, hostname, platform, platform_history_json, settings_json,
+         SELECT id, hostname, platform, platform_history_json, settings_json, last_seen,
             template_device_id, is_image_source, token_hash
          FROM devices WHERE lower(hostname)=lower(?)
          ''', (hostname,)).fetchone()
