@@ -22,7 +22,7 @@ from common.http_client import request_json
 from common.platform_info import exam_mode, hostname, logged_in_users, system_information
 from executor import Executor
 
-VERSION = '0.8.0'
+VERSION = '0.8.3'
 
 
 def log(message, **fields):

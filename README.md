@@ -1,4 +1,4 @@
-# LCS v0.8.0
+# LCS v0.8.3
 
 LCS verwaltet Windows- und Linux-Arbeitsplätze mit einem bewusst kleinen,
 lokal funktionsfähigen Client. Der Systemdienst enthält seine Fähigkeiten fest
