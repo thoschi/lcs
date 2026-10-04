@@ -559,13 +559,6 @@ def heartbeat(config, state, stack, inventory):
    return post_device(config, state, '/api/v1/heartbeat', payload)
 
 
-def template_heartbeat(config, state):
-   return post_device(config, state, '/api/v1/heartbeat', {
-      'agent_version': VERSION,
-      'stack_generation': 0,
-   })
-
-
 def apply_server_role(state, response, state_dir, user_runtime):
    image_source = response.get('role') == 'template'
    if state.get('image_source') != image_source:
@@ -854,7 +847,7 @@ def run_forever(env_path=None, stop_requested=None):
       if state.get('image_source'):
          if now - last_heartbeat >= heartbeat_interval:
             try:
-               status, response = template_heartbeat(config, state)
+               status, response = heartbeat(config, state, stack, inventory)
                if status == 401:
                   state = {}
                   user_runtime['client_enabled'] = False
