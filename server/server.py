@@ -161,6 +161,9 @@ def dashboard_data():
          LEFT JOIN devices executed ON executed.id=a.execution_device_id
          ORDER BY a.id DESC LIMIT 500
       ''').fetchall()]
+      exam_history = [dict(row) for row in conn.execute('''
+         SELECT * FROM exam_history ORDER BY started_at DESC
+      ''').fetchall()]
    for item in devices:
       item['online'] = item['last_seen'] >= now - 60
       try:
@@ -182,6 +185,15 @@ def dashboard_data():
          if key not in ('capabilities', 'current_user', 'current_users')
       ]
       item['exam_mode'] = bool(item['hardware'].get('exam_mode'))
+      try:
+         item['settings'] = json.loads(item.get('settings_json') or '{}')
+      except (json.JSONDecodeError, TypeError):
+         item['settings'] = {}
+      item['exam_client'] = item['settings'].get('LCS_EXAM_MODE') == 'true'
+      item['exam_history'] = [entry for entry in exam_history if entry['device_id'] == item['id']]
+      for entry in item['exam_history']:
+         entry['effective_end'] = entry['ended_at'] or entry['last_seen']
+         entry['duration_minutes'] = max(0, round((entry['effective_end'] - entry['started_at']) / 60))
    platform_labels = {'windows': 'WIN', 'linux': 'UBN', 'linbo': 'LBO'}
    for item in devices:
       try:
@@ -197,7 +209,7 @@ def dashboard_data():
       if current:
          history[current] = item['last_seen']
       platforms = [
-         {'value': platform, 'label': platform_labels.get(platform, platform.upper()),
+         {'value': platform, 'label': 'EXM' if item['exam_client'] and platform == 'linux' else platform_labels.get(platform, platform.upper()),
           'current': item['online'] and platform == current, 'last_seen': history[platform],
           'last_seen_text': format_datetime(history[platform])}
          for platform in ('linbo', 'linux', 'windows') if platform in history
@@ -587,7 +599,8 @@ def create_token():
    try:
       settings = core.enrollment_settings(
          request.form.get('user_data', ''), request.form.get('use_domain_username') == '1',
-         request.form.get('password_username', ''))
+         request.form.get('password_username', ''), request.form.get('exam_mode') == '1',
+         request.form.get('proxy', ''))
       token = core.add_enrollment_token(request.form.get('name', ''), request.form.get('password', ''),
                                         settings=settings, hostname=request.form.get('hostname', ''),
                                         token_type=request.form.get('token_type', 'template'))
@@ -608,7 +621,8 @@ def edit_token(token_id):
    try:
       settings = core.enrollment_settings(
          request.form.get('user_data', ''), request.form.get('use_domain_username') == '1',
-         request.form.get('password_username', ''))
+         request.form.get('password_username', ''), request.form.get('exam_mode') == '1',
+         request.form.get('proxy', ''))
       name = request.form.get('name', '').strip()
       hostname = request.form.get('hostname', '').strip()
       if not name:
@@ -624,6 +638,19 @@ def edit_token(token_id):
    except Exception as exc:
       flash(str(exc), 'error')
    return redirect(url_for('admin_tokens') + '#tokens')
+
+
+@app.post('/admin/device/<device_id>/exam-history/delete')
+@admin_required
+def delete_exam_history(device_id):
+   check_csrf()
+   with core.db() as conn:
+      device = conn.execute('SELECT hostname FROM devices WHERE id=?', (device_id,)).fetchone()
+      if not device:
+         abort(404)
+      conn.execute('DELETE FROM exam_history WHERE device_id=?', (device_id,))
+   flash('Prüfungshistorie für %s gelöscht.' % device['hostname'], 'success')
+   return redirect(url_for('admin_clients') + '#devices')
 
 
 @app.post('/admin/token/<int:token_id>/toggle')

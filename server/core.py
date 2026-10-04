@@ -101,6 +101,7 @@ def _merge_duplicate_devices(conn):
          conn.execute('UPDATE actions SET device_id=? WHERE device_id=?', (keep_id, old_id))
          conn.execute('UPDATE actions SET execution_device_id=? WHERE execution_device_id=?', (keep_id, old_id))
          conn.execute('UPDATE events SET device_id=? WHERE device_id=?', (keep_id, old_id))
+         conn.execute('UPDATE exam_history SET device_id=? WHERE device_id=?', (keep_id, old_id))
          conn.execute('UPDATE devices SET template_device_id=? WHERE template_device_id=?', (keep_id, old_id))
          conn.execute('UPDATE enrollment_tokens SET template_device_id=? WHERE template_device_id=?', (keep_id, old_id))
          conn.execute('DELETE FROM device_groups WHERE device_id=?', (old_id,))
@@ -164,6 +165,13 @@ def init_db():
          old_token_hash TEXT NOT NULL DEFAULT '',
          new_token_hash TEXT NOT NULL DEFAULT '',
          created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS exam_history (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         device_id TEXT NOT NULL,
+         started_at INTEGER NOT NULL,
+         ended_at INTEGER,
+         last_seen INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS device_groups (
          group_name TEXT NOT NULL,
@@ -265,6 +273,8 @@ def init_db():
             ON device_groups(device_id, group_name);
          CREATE INDEX IF NOT EXISTS idx_device_audit_created
             ON device_audit_log(created_at DESC, id DESC);
+         CREATE INDEX IF NOT EXISTS idx_exam_history_device
+            ON exam_history(device_id, started_at DESC);
          CREATE INDEX IF NOT EXISTS idx_devices_hostname
             ON devices(hostname COLLATE NOCASE);
          CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_unique_hostname
@@ -304,7 +314,7 @@ def verify_password(password, stored):
       return False
 
 
-def enrollment_settings(user_data='', use_domain_username=False, password_username=''):
+def enrollment_settings(user_data='', use_domain_username=False, password_username='', exam_mode=False, proxy=''):
    settings = {}
    user_data = str(user_data).strip()
    if '\n' in user_data or '\r' in user_data:
@@ -317,6 +327,15 @@ def enrollment_settings(user_data='', use_domain_username=False, password_userna
       raise ValueError('Systembenutzername darf keinen Zeilenumbruch enthalten')
    if password_username:
       settings['LCS_PASSWORD_USERNAME'] = password_username
+   proxy = str(proxy).strip()
+   if '\n' in proxy or '\r' in proxy:
+      raise ValueError('Proxy darf keinen Zeilenumbruch enthalten')
+   if exam_mode:
+      if not proxy:
+         raise ValueError('Für den Prüfungsmodus ist ein Proxy erforderlich')
+      settings['LCS_EXAM_MODE'] = 'true'
+      settings['LCS_USER_ENABLED'] = 'false'
+      settings['LCS_PROXY'] = proxy
    return settings
 
 
@@ -616,8 +635,24 @@ def heartbeat(device_id, token, payload):
          json.dumps(payload.get('logged_in_users', []), ensure_ascii=False),
          json.dumps(payload.get('hardware', {}), ensure_ascii=False),
          0, int(image_source), device['id']))
+      exam_mode = bool(payload.get('hardware', {}).get('exam_mode'))
+      active_exam = conn.execute('''SELECT id FROM exam_history
+         WHERE device_id=? AND ended_at IS NULL ORDER BY id DESC LIMIT 1''', (device['id'],)).fetchone()
+      if exam_mode:
+         if active_exam:
+            conn.execute('UPDATE exam_history SET last_seen=? WHERE id=?', (now, active_exam['id']))
+         else:
+            conn.execute('INSERT INTO exam_history(device_id, started_at, last_seen) VALUES(?,?,?)',
+                         (device['id'], now, now))
+      elif active_exam:
+         conn.execute('UPDATE exam_history SET ended_at=?, last_seen=? WHERE id=?',
+                      (now, now, active_exam['id']))
+      try:
+         device_settings = json.loads(device['settings_json'] or '{}')
+      except (json.JSONDecodeError, TypeError):
+         device_settings = {}
    return 200, {'ok': True, 'role': 'template' if image_source else 'client',
-                'client_enabled': not image_source}
+                'client_enabled': not image_source and device_settings.get('LCS_EXAM_MODE') != 'true'}
 
 
 def groups_for_device(device_id):
@@ -911,6 +946,7 @@ def delete_device_data(conn, device_id):
    conn.execute('DELETE FROM sessions WHERE device_id=?', (device_id,))
    conn.execute('DELETE FROM actions WHERE device_id=?', (device_id,))
    conn.execute('DELETE FROM events WHERE device_id=?', (device_id,))
+   conn.execute('DELETE FROM exam_history WHERE device_id=?', (device_id,))
    conn.execute('DELETE FROM device_groups WHERE device_id=?', (device_id,))
    conn.execute("DELETE FROM capability_assignments WHERE target_type='device' AND target_id=?", (device_id,))
    conn.execute('DELETE FROM devices WHERE id=?', (device_id,))
