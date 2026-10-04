@@ -1,3 +1,4 @@
+import ipaddress
 import os
 import platform
 import socket
@@ -62,14 +63,23 @@ def exam_mode():
    return _cmd(['systemctl', 'is-active', 'squid']) == 'active'
 
 
-def system_information(service_version, users=None):
-   """Collect only bounded, local inventory calls suitable for every heartbeat."""
+def _ip_addresses():
    addresses = []
    try:
-      addresses = sorted({item[4][0] for item in socket.getaddrinfo(hostname(), None)
-                          if item[0] in (socket.AF_INET, socket.AF_INET6) and not item[4][0].startswith('127.')})
+      addresses.extend(item[4][0] for item in socket.getaddrinfo(hostname(), None)
+                       if item[0] in (socket.AF_INET, socket.AF_INET6))
    except OSError:
       pass
+   if os.name != 'nt':
+      # Der Hostname ist auf vielen Linux-Clients nur auf Loopback aufgelöst.
+      addresses.extend(_cmd(['hostname', '-I']).split())
+   return sorted({address for address in addresses
+                  if not ipaddress.ip_address(address).is_loopback})
+
+
+def system_information(service_version, users=None):
+   """Collect only bounded, local inventory calls suitable for every heartbeat."""
+   addresses = _ip_addresses()
    mac_value = uuid.getnode()
    mac = ':'.join('%02x' % ((mac_value >> shift) & 0xff) for shift in range(40, -1, -8))
    if os.name == 'nt':
