@@ -393,6 +393,7 @@
                   const label = document.createElement('span');
                   label.className = `platform-badge platform-${platform.value}${platform.current ? ' current' : ''}`;
                   label.textContent = platform.label;
+                  label.title = `Letzter Kontakt zu diesem Betriebssystem: ${platform.last_seen_text}`;
                   return index ? [document.createTextNode(' '), label] : [label];
                }));
                if (!device.platforms.length) platformCell.textContent = '–';

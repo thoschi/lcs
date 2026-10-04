@@ -187,12 +187,17 @@ def dashboard_data():
       except (json.JSONDecodeError, TypeError):
          history = []
       current = (item.get('platform') or '').lower()
-      history = [str(platform).lower() for platform in history if platform]
-      if current and current not in history:
-         history.append(current)
-      platforms = [
+      if isinstance(history, list):
+         history = {str(platform).lower(): 0 for platform in history if platform}
+      else:
+         history = {str(platform).lower(): int(last_seen or 0)
+                    for platform, last_seen in history.items() if platform}
+      if current:
+         history[current] = item['last_seen']
+      platforms = [] if not item['online'] else [
          {'value': platform, 'label': platform_labels.get(platform, platform.upper()),
-          'current': platform == current}
+          'current': platform == current, 'last_seen': history[platform],
+          'last_seen_text': format_datetime(history[platform])}
          for platform in ('linbo', 'linux', 'windows') if platform in history
       ]
       item['platforms'] = platforms
