@@ -54,6 +54,26 @@ Der LINBO-Agent wird nicht installiert, sondern als statische Binärdatei gebaut
 ./build-linbo.sh https://lcs.example /pfad/zur/ablage/lcs-linbo-agent
 ```
 
+### Betrieb mit Squid und UFW
+
+Im Normalbetrieb verbindet sich LCS ohne Proxy direkt mit dem Server. Dafür darf
+`client.env` keinen Eintrag `LCS_PROXY` enthalten. Wenn UFW im Prüfungsmodus
+direkte ausgehende Verbindungen sperrt, muss Squid den LCS-Server einschließlich
+des HTTPS-`CONNECT` erlauben. Für diesen Betriebsmodus wird der lokale Proxy in
+`/opt/lcs-service/client.env` aktiviert:
+
+```ini
+LCS_PROXY=http://127.0.0.1:3128
+```
+
+Nach dem Ändern der Datei ist `systemctl restart lcs-service` erforderlich. Beim
+Beenden des Prüfungsmodus wird der Eintrag wieder entfernt und der Dienst erneut
+gestartet. So bleibt die direkte Verbindung der Normalfall und es gibt keinen
+verdeckten Wechsel auf einen anderen Verbindungsweg. Alternativ kann UFW eine
+eng begrenzte Ausnahme für Zieladresse und Port des LCS-Servers erhalten; dann
+ist auch im Prüfungsmodus kein `LCS_PROXY` nötig. Bei wechselnden Server-Adressen
+ist die Proxy-Variante robuster als eine IP-basierte UFW-Regel.
+
 `upgrade` ersetzt dabei nur Programmcode; State, Enrollment-Token und `.env`
 bleiben erhalten. Die Server-URL muss beim Upgrade von Systemdienst,
 User-Client oder Workstation nicht erneut angegeben werden, da der Installer
