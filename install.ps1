@@ -194,7 +194,7 @@ function Clear-Runtime([string]$Root, [string[]]$Keep) {
 }
 
 function Set-ServerSettings($Settings) {
-   $allowed = @('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME', 'LCS_TOKEN_CHECKSUM')
+   $allowed = @('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME', 'LCS_TEMPLATE_HOSTNAME', 'LCS_TOKEN_CHECKSUM', 'LCS_EXAM_MODE', 'LCS_USER_ENABLED', 'LCS_PROXY')
    $lines = if (Test-Path $ClientEnv) { @(Get-Content -LiteralPath $ClientEnv) } else { @() }
    $lines = @($lines | Where-Object {
       $line = $_
@@ -207,6 +207,7 @@ function Set-ServerSettings($Settings) {
          $lines += "$key=$value"
       }
    }
+   if ($Settings.LCS_USER_ENABLED -eq 'false') { $script:NoUser = $true }
    Write-Utf8 $ClientEnv (($lines -join "`r`n") + "`r`n")
 }
 

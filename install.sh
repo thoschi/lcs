@@ -154,7 +154,8 @@ import sys
 path, raw = sys.argv[1:]
 settings = json.loads(raw).get('settings', {})
 allowed = ('LCS_USER_DATA', 'LCS_USE_DOMAIN_USERNAME', 'LCS_PASSWORD_USERNAME',
-           'LCS_TEMPLATE_HOSTNAME', 'LCS_TOKEN_CHECKSUM')
+           'LCS_TEMPLATE_HOSTNAME', 'LCS_TOKEN_CHECKSUM', 'LCS_EXAM_MODE',
+           'LCS_USER_ENABLED', 'LCS_PROXY')
 lines = open(path, encoding='utf-8').read().splitlines() if os.path.exists(path) else []
 lines = [line for line in lines if not any(line.startswith(key + '=') for key in allowed)]
 for key in allowed:
@@ -407,7 +408,9 @@ write_client_env() {
    ensure_server_url
    mkdir -p "$LCS_SERVICE_ROOT"
 
-   local proxy ca user_data require_local_username password_username template_hostname token_checksum default_password
+   local proxy ca user_data require_local_username password_username template_hostname token_checksum default_password user_enabled
+   user_enabled="$(read_env_value "$LCS_CLIENT_ENV" LCS_USER_ENABLED)"
+   case "${user_enabled,,}" in 0|false|no|off) NO_USER=1 ;; esac
    proxy="$INSTALL_PROXY"
    [ -z "$proxy" ] && proxy="$(read_env_value "$LCS_CLIENT_ENV" LCS_PROXY)"
    ca="$(read_env_value "$LCS_CLIENT_ENV" LCS_CA_FILE)"
