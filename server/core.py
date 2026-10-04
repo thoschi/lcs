@@ -486,14 +486,18 @@ def enroll(payload):
       now = now_ts()
       platform = str(payload.get('platform', '')).lower()
       try:
-         platform_history = json.loads(existing['platform_history_json'] or '[]') if existing else []
+         stored_history = json.loads(existing['platform_history_json'] or '{}') if existing else {}
       except (json.JSONDecodeError, TypeError):
-         platform_history = []
-      platform_history = [str(value).lower() for value in platform_history if value]
-      if existing and existing['platform'] and existing['platform'].lower() not in platform_history:
-         platform_history.append(existing['platform'].lower())
-      if platform and platform not in platform_history:
-         platform_history.append(platform)
+         stored_history = {}
+      if isinstance(stored_history, list):
+         platform_history = {str(value).lower(): 0 for value in stored_history if value}
+      else:
+         platform_history = {str(key).lower(): int(value or 0)
+                             for key, value in stored_history.items() if key}
+      if existing and existing['platform']:
+         platform_history[existing['platform'].lower()] = existing['last_seen']
+      if platform:
+         platform_history[platform] = now
       platform_changed = bool(existing and platform != (existing['platform'] or '').lower())
       conn.execute('''
          INSERT INTO devices(id, token_hash, hostname, platform, platform_history_json, agent_version,
@@ -587,16 +591,28 @@ def heartbeat(device_id, token, payload):
    if not device:
       return 401, {'error': 'unauthorized'}
    hostname = str(payload.get('hostname') or payload.get('hardware', {}).get('hostname') or device['hostname'])
+   now = now_ts()
+   try:
+      stored_history = json.loads(device['platform_history_json'] or '{}')
+   except (json.JSONDecodeError, TypeError):
+      stored_history = {}
+   if isinstance(stored_history, list):
+      platform_history = {str(value).lower(): 0 for value in stored_history if value}
+   else:
+      platform_history = {str(key).lower(): int(value or 0)
+                          for key, value in stored_history.items() if key}
+   if device['platform']:
+      platform_history[device['platform'].lower()] = now
    with db() as conn:
       conn.execute('''UPDATE enrollment_tokens SET template_device_id=?
          WHERE enabled=1 AND token_type='template' AND template_device_id=''
             AND hostname<>'' AND lower(hostname)=lower(?)''', (device['id'], hostname))
       image_source = _device_is_template(conn, device['id'], hostname)
       conn.execute('''
-         UPDATE devices SET last_seen=?, hostname=?, agent_version=?,
+         UPDATE devices SET last_seen=?, hostname=?, agent_version=?, platform_history_json=?,
             logged_in_users_json=?, hardware_json=?, stack_generation=?, is_image_source=? WHERE id=?
       ''', (
-         now_ts(), hostname, payload.get('agent_version', ''),
+         now, hostname, payload.get('agent_version', ''), json.dumps(platform_history),
          json.dumps(payload.get('logged_in_users', []), ensure_ascii=False),
          json.dumps(payload.get('hardware', {}), ensure_ascii=False),
          0, int(image_source), device['id']))
