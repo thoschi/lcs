@@ -19,7 +19,7 @@ sys.path.insert(0, str(BASE))
 from capabilities import execute as execute_capability, public_capabilities
 from common.config import env_bool, load_env
 from common.http_client import request_json
-from common.platform_info import hostname, logged_in_users, system_information
+from common.platform_info import exam_mode, hostname, logged_in_users, system_information
 from executor import Executor
 
 VERSION = '0.8.0'
@@ -545,6 +545,8 @@ def heartbeat(config, state, stack, inventory):
       inventory['information'] = system_information(VERSION, users)
       inventory['updated_at'] = now
    information = dict(inventory['information'])
+   # Der Betriebsmodus kann sich schneller als das übrige Inventar ändern.
+   information['exam_mode'] = exam_mode()
    capabilities = public_capabilities()
    information['capabilities'] = capabilities
    payload = {

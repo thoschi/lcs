@@ -173,13 +173,15 @@ def dashboard_data():
          'os_release': 'Systemversion', 'architecture': 'Architektur',
          'processor': 'Prozessor', 'manufacturer': 'Hersteller', 'model': 'Modell',
          'bios': 'BIOS', 'memory_bytes': 'Arbeitsspeicher (Bytes)',
-         'software': 'Installierte Software',
+         'software': 'Installierte Software', 'exam_mode': 'Prüfungsmodus',
       }
       item['info_items'] = [
-         {'label': labels.get(key, key.replace('_', ' ').title()), 'value': value}
+         {'label': labels.get(key, key.replace('_', ' ').title()),
+          'value': ('EXAM aktiv' if value else 'nicht aktiv') if key == 'exam_mode' else value}
          for key, value in item['hardware'].items()
          if key not in ('capabilities', 'current_user', 'current_users')
       ]
+      item['exam_mode'] = bool(item['hardware'].get('exam_mode'))
    platform_labels = {'windows': 'WIN', 'linux': 'UBN', 'linbo': 'LBO'}
    for item in devices:
       try:
@@ -442,6 +444,7 @@ def client_status():
       'agent_version': item['agent_version'] or '',
       'groups': item['groups'] or '',
       'hardware': item['hardware'],
+      'exam_mode': item['exam_mode'],
       'is_image_source': bool(item.get('is_image_source')),
       'capability_states': item['capability_states'],
       'executable_capabilities': item['executable_capabilities'],
