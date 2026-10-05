@@ -102,6 +102,9 @@ def _merge_duplicate_devices(conn):
          conn.execute('UPDATE actions SET execution_device_id=? WHERE execution_device_id=?', (keep_id, old_id))
          conn.execute('UPDATE events SET device_id=? WHERE device_id=?', (keep_id, old_id))
          conn.execute('UPDATE exam_history SET device_id=? WHERE device_id=?', (keep_id, old_id))
+         conn.execute('''INSERT OR IGNORE INTO device_credentials(device_id, platform, token_hash)
+            SELECT ?, platform, token_hash FROM device_credentials WHERE device_id=?''', (keep_id, old_id))
+         conn.execute('DELETE FROM device_credentials WHERE device_id=?', (old_id,))
          conn.execute('UPDATE devices SET template_device_id=? WHERE template_device_id=?', (keep_id, old_id))
          conn.execute('UPDATE enrollment_tokens SET template_device_id=? WHERE template_device_id=?', (keep_id, old_id))
          conn.execute('DELETE FROM device_groups WHERE device_id=?', (old_id,))
@@ -172,6 +175,12 @@ def init_db():
          started_at INTEGER NOT NULL,
          ended_at INTEGER,
          last_seen INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS device_credentials (
+         device_id TEXT NOT NULL,
+         platform TEXT NOT NULL,
+         token_hash TEXT NOT NULL,
+         PRIMARY KEY(device_id, platform)
       );
       CREATE TABLE IF NOT EXISTS device_groups (
          group_name TEXT NOT NULL,
@@ -263,6 +272,9 @@ def init_db():
       assignment_columns = {row['name'] for row in conn.execute('PRAGMA table_info(capability_assignments)').fetchall()}
       if 'execution' not in assignment_columns:
          conn.execute("ALTER TABLE capability_assignments ADD COLUMN execution TEXT NOT NULL DEFAULT 'manual'")
+      conn.execute('''INSERT OR IGNORE INTO device_credentials(device_id, platform, token_hash)
+         SELECT id, lower(platform), token_hash FROM devices
+         WHERE platform IS NOT NULL AND platform<>'' AND token_hash<>'' ''')
       _merge_duplicate_devices(conn)
       conn.executescript('''
          CREATE INDEX IF NOT EXISTS idx_actions_poll
@@ -522,7 +534,18 @@ def enroll(payload):
             settings = {}
          history_platform = 'exam' if platform == 'linux' and settings.get('LCS_EXAM_MODE') == 'true' else platform
          platform_history[history_platform] = now
+      credential_platform = history_platform if platform else ''
       platform_changed = bool(existing and platform != (existing['platform'] or '').lower())
+      if existing and existing['platform'] and existing['token_hash']:
+         try:
+            existing_settings = json.loads(existing['settings_json'] or '{}')
+         except (json.JSONDecodeError, TypeError):
+            existing_settings = {}
+         existing_platform = existing['platform'].lower()
+         if existing_platform == 'linux' and existing_settings.get('LCS_EXAM_MODE') == 'true':
+            existing_platform = 'exam'
+         conn.execute('''INSERT OR IGNORE INTO device_credentials(device_id, platform, token_hash)
+            VALUES(?,?,?)''', (device_id, existing_platform, existing['token_hash']))
       conn.execute('''
          INSERT INTO devices(id, token_hash, hostname, platform, platform_history_json, agent_version,
             hardware_json, logged_in_users_json, first_seen, last_seen, is_image_source, settings_json, template_device_id)
@@ -544,6 +567,9 @@ def enroll(payload):
          json.dumps(platform_history), payload.get('agent_version', ''), '{}', '[]', now, now,
          int(image_source), settings_json, template_device_id
       ) + (int(platform_changed), int(platform_changed)))
+      conn.execute('''INSERT INTO device_credentials(device_id, platform, token_hash) VALUES(?,?,?)
+         ON CONFLICT(device_id, platform) DO UPDATE SET token_hash=excluded.token_hash''',
+         (device_id, credential_platform, new_token_hash))
       if reusable:
          if reusable['token_type'] == 'single':
             _apply_enrollment_group(conn, device_id, reusable['group_name'], now)
@@ -594,9 +620,12 @@ def _apply_enrollment_group(conn, device_id, group_name, now):
 def authenticate_device(device_id, token):
    if not device_id or not token:
       return None
+   supplied_hash = token_hash(token)
    with db() as conn:
       row = conn.execute('SELECT * FROM devices WHERE id=?', (device_id,)).fetchone()
-   if not row or not hmac.compare_digest(row['token_hash'], token_hash(token)):
+      credential = conn.execute('''SELECT 1 FROM device_credentials
+         WHERE device_id=? AND token_hash=?''', (device_id, supplied_hash)).fetchone()
+   if not row or (not credential and not hmac.compare_digest(row['token_hash'], supplied_hash)):
       return None
    return row
 
@@ -877,6 +906,7 @@ def action_result(device_id, token, payload):
          else:
             # Die lokale Identität ist ab jetzt ungültig und wird neu registriert.
             conn.execute("UPDATE devices SET token_hash='' WHERE id=?", (device['id'],))
+            conn.execute('DELETE FROM device_credentials WHERE device_id=?', (device['id'],))
    return 200, {'ok': True}
 
 
@@ -953,6 +983,7 @@ def delete_device_data(conn, device_id):
    conn.execute('DELETE FROM actions WHERE device_id=?', (device_id,))
    conn.execute('DELETE FROM events WHERE device_id=?', (device_id,))
    conn.execute('DELETE FROM exam_history WHERE device_id=?', (device_id,))
+   conn.execute('DELETE FROM device_credentials WHERE device_id=?', (device_id,))
    conn.execute('DELETE FROM device_groups WHERE device_id=?', (device_id,))
    conn.execute("DELETE FROM capability_assignments WHERE target_type='device' AND target_id=?", (device_id,))
    conn.execute('DELETE FROM devices WHERE id=?', (device_id,))
