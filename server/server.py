@@ -209,11 +209,16 @@ def dashboard_data():
       if current:
          history[current] = item['last_seen']
       platforms = [
-         {'value': platform, 'label': 'EXM' if item['exam_client'] and platform == 'linux' else platform_labels.get(platform, platform.upper()),
+         {'value': platform, 'label': platform_labels.get(platform, platform.upper()),
           'current': item['online'] and platform == current, 'last_seen': history[platform],
           'last_seen_text': format_datetime(history[platform])}
          for platform in ('linbo', 'linux', 'windows') if platform in history
       ]
+      if item['exam_client'] and 'linux' in history:
+         platforms.append({
+            'value': 'exam', 'label': 'EXM', 'current': item['online'] and current == 'linux',
+            'last_seen': history['linux'], 'last_seen_text': format_datetime(history['linux']),
+         })
       item['platforms'] = platforms
       item['platform_filter'] = ' '.join(entry['value'] for entry in platforms)
    template_tree = []
