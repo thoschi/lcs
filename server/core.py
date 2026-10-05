@@ -119,6 +119,9 @@ def init_db():
       conn.execute('PRAGMA foreign_keys=OFF')
       _migrate_devices(conn)
       _create_devices_table(conn)
+      credentials_missing = conn.execute(
+         "SELECT 1 FROM sqlite_master WHERE type='table' AND name='device_credentials'"
+      ).fetchone() is None
       conn.executescript('''
       CREATE TABLE IF NOT EXISTS users (
          username TEXT PRIMARY KEY,
@@ -273,8 +276,19 @@ def init_db():
       if 'execution' not in assignment_columns:
          conn.execute("ALTER TABLE capability_assignments ADD COLUMN execution TEXT NOT NULL DEFAULT 'manual'")
       conn.execute('''INSERT OR IGNORE INTO device_credentials(device_id, platform, token_hash)
-         SELECT id, lower(platform), token_hash FROM devices
+         SELECT id,
+            CASE WHEN lower(platform)='linux' AND json_extract(settings_json, '$.LCS_EXAM_MODE')='true'
+               THEN 'exam' ELSE lower(platform) END,
+            token_hash FROM devices
          WHERE platform IS NOT NULL AND platform<>'' AND token_hash<>'' ''')
+      if credentials_missing:
+         # Der letzte, beim Systemwechsel verdrängte Zugang ist weiterhin lokal vorhanden.
+         conn.execute('''INSERT OR IGNORE INTO device_credentials(device_id, platform, token_hash)
+            SELECT d.id, 'previous', a.old_token_hash
+            FROM devices d JOIN device_audit_log a
+               ON a.device_id=d.id AND a.new_token_hash=d.token_hash
+            WHERE a.old_token_hash<>''
+            ORDER BY a.id DESC''')
       _merge_duplicate_devices(conn)
       conn.executescript('''
          CREATE INDEX IF NOT EXISTS idx_actions_poll
