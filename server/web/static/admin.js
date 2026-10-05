@@ -385,7 +385,6 @@
                const status = row.querySelector('[data-field="status"]');
                status.querySelector('.dot').classList.toggle('online', device.online);
                status.querySelector('[data-online-state]').textContent = device.online ? 'online' : 'offline';
-               status.querySelector('[data-exam-state]').hidden = !device.exam_mode;
                for (const [field, value] of Object.entries({hostname: device.hostname, agent: device.agent_version})) {
                   row.querySelector(`[data-field="${field}"]`).textContent = value || '–';
                }

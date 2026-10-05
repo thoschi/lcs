@@ -194,7 +194,7 @@ def dashboard_data():
       for entry in item['exam_history']:
          entry['effective_end'] = entry['ended_at'] or entry['last_seen']
          entry['duration_minutes'] = max(0, round((entry['effective_end'] - entry['started_at']) / 60))
-   platform_labels = {'windows': 'WIN', 'linux': 'UBN', 'linbo': 'LBO'}
+   platform_labels = {'windows': 'WIN', 'linux': 'UBN', 'linbo': 'LBO', 'exam': 'EXM'}
    for item in devices:
       try:
          history = json.loads(item.get('platform_history_json') or '[]')
@@ -206,19 +206,19 @@ def dashboard_data():
       else:
          history = {str(platform).lower(): int(last_seen or 0)
                     for platform, last_seen in history.items() if platform}
-      if current:
-         history[current] = item['last_seen']
+      if item['exam_client'] and 'linux' in history:
+         history['exam'] = max(history.get('exam', 0), history.pop('linux'))
+      if item['exam_history'] and 'exam' not in history:
+         history['exam'] = max(entry['last_seen'] for entry in item['exam_history'])
+      current_platform = 'exam' if current == 'linux' and (item['exam_client'] or item['exam_mode']) else current
+      if current_platform:
+         history[current_platform] = item['last_seen']
       platforms = [
          {'value': platform, 'label': platform_labels.get(platform, platform.upper()),
-          'current': item['online'] and platform == current, 'last_seen': history[platform],
+          'current': item['online'] and platform == current_platform, 'last_seen': history[platform],
           'last_seen_text': format_datetime(history[platform])}
-         for platform in ('linbo', 'linux', 'windows') if platform in history
+         for platform in ('linbo', 'linux', 'windows', 'exam') if platform in history
       ]
-      if item['exam_client'] and 'linux' in history:
-         platforms.append({
-            'value': 'exam', 'label': 'EXM', 'current': item['online'] and current == 'linux',
-            'last_seen': history['linux'], 'last_seen_text': format_datetime(history['linux']),
-         })
       item['platforms'] = platforms
       item['platform_filter'] = ' '.join(entry['value'] for entry in platforms)
    template_tree = []

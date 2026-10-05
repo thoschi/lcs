@@ -516,7 +516,12 @@ def enroll(payload):
       if existing and existing['platform']:
          platform_history[existing['platform'].lower()] = existing['last_seen']
       if platform:
-         platform_history[platform] = now
+         try:
+            settings = json.loads(settings_json or '{}')
+         except (json.JSONDecodeError, TypeError):
+            settings = {}
+         history_platform = 'exam' if platform == 'linux' and settings.get('LCS_EXAM_MODE') == 'true' else platform
+         platform_history[history_platform] = now
       platform_changed = bool(existing and platform != (existing['platform'] or '').lower())
       conn.execute('''
          INSERT INTO devices(id, token_hash, hostname, platform, platform_history_json, agent_version,
@@ -620,8 +625,10 @@ def heartbeat(device_id, token, payload):
    else:
       platform_history = {str(key).lower(): int(value or 0)
                           for key, value in stored_history.items() if key}
+   exam_mode = bool(payload.get('hardware', {}).get('exam_mode'))
    if device['platform']:
-      platform_history[device['platform'].lower()] = now
+      platform = device['platform'].lower()
+      platform_history['exam' if platform == 'linux' and exam_mode else platform] = now
    with db() as conn:
       conn.execute('''UPDATE enrollment_tokens SET template_device_id=?
          WHERE enabled=1 AND token_type='template' AND template_device_id=''
@@ -635,7 +642,6 @@ def heartbeat(device_id, token, payload):
          json.dumps(payload.get('logged_in_users', []), ensure_ascii=False),
          json.dumps(payload.get('hardware', {}), ensure_ascii=False),
          0, int(image_source), device['id']))
-      exam_mode = bool(payload.get('hardware', {}).get('exam_mode'))
       active_exam = conn.execute('''SELECT id FROM exam_history
          WHERE device_id=? AND ended_at IS NULL ORDER BY id DESC LIMIT 1''', (device['id'],)).fetchone()
       if exam_mode:
