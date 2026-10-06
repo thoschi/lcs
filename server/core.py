@@ -637,11 +637,13 @@ def authenticate_device(device_id, token):
    supplied_hash = token_hash(token)
    with db() as conn:
       row = conn.execute('SELECT * FROM devices WHERE id=?', (device_id,)).fetchone()
-      credential = conn.execute('''SELECT 1 FROM device_credentials
+      credential = conn.execute('''SELECT platform FROM device_credentials
          WHERE device_id=? AND token_hash=?''', (device_id, supplied_hash)).fetchone()
    if not row or (not credential and not hmac.compare_digest(row['token_hash'], supplied_hash)):
       return None
-   return row
+   device = dict(row)
+   device['credential_platform'] = credential['platform'] if credential else row['platform']
+   return device
 
 
 def _device_is_template(conn, device_id, hostname):
@@ -669,8 +671,12 @@ def heartbeat(device_id, token, payload):
       platform_history = {str(key).lower(): int(value or 0)
                           for key, value in stored_history.items() if key}
    exam_mode = bool(payload.get('hardware', {}).get('exam_mode'))
-   if device['platform']:
-      platform = device['platform'].lower()
+   # Ein gespeicherter OS-Token bleibt nach einem Bootwechsel gültig.
+   # Der Heartbeat dieses Tokens bestimmt das jetzt laufende Betriebssystem.
+   platform = (device['credential_platform'] or device['platform'] or '').lower()
+   if platform == 'exam':
+      platform = 'linux'
+   if platform:
       platform_history['exam' if platform == 'linux' and exam_mode else platform] = now
    with db() as conn:
       conn.execute('''UPDATE enrollment_tokens SET template_device_id=?
@@ -678,10 +684,10 @@ def heartbeat(device_id, token, payload):
             AND hostname<>'' AND lower(hostname)=lower(?)''', (device['id'], hostname))
       image_source = _device_is_template(conn, device['id'], hostname)
       conn.execute('''
-         UPDATE devices SET last_seen=?, hostname=?, agent_version=?, platform_history_json=?,
+         UPDATE devices SET last_seen=?, hostname=?, platform=?, agent_version=?, platform_history_json=?,
             logged_in_users_json=?, hardware_json=?, stack_generation=?, is_image_source=? WHERE id=?
       ''', (
-         now, hostname, payload.get('agent_version', ''), json.dumps(platform_history),
+         now, hostname, platform, payload.get('agent_version', ''), json.dumps(platform_history),
          json.dumps(payload.get('logged_in_users', []), ensure_ascii=False),
          json.dumps(payload.get('hardware', {}), ensure_ascii=False),
          0, int(image_source), device['id']))
