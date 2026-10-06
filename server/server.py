@@ -206,11 +206,9 @@ def dashboard_data():
       else:
          history = {str(platform).lower(): int(last_seen or 0)
                     for platform, last_seen in history.items() if platform}
-      if item['exam_client'] and 'linux' in history:
-         history['exam'] = max(history.get('exam', 0), history.pop('linux'))
       if item['exam_history'] and 'exam' not in history:
          history['exam'] = max(entry['last_seen'] for entry in item['exam_history'])
-      current_platform = 'exam' if current == 'linux' and (item['exam_client'] or item['exam_mode']) else current
+      current_platform = 'exam' if current == 'linux' and item['exam_mode'] else current
       if current_platform:
          history[current_platform] = item['last_seen']
       platforms = [
@@ -220,7 +218,7 @@ def dashboard_data():
          for platform in ('linbo', 'linux', 'windows', 'exam') if platform in history
       ]
       item['platforms'] = platforms
-      item['platform_filter'] = ' '.join(entry['value'] for entry in platforms)
+      item['platform_filter'] = current_platform
    template_tree = []
    for template in (item for item in devices if item['is_image_source']):
       branch = dict(template)

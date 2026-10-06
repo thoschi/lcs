@@ -56,7 +56,7 @@
       let visible = 0;
       rows().forEach(row => {
          const show = terms.every(term => row.dataset.search.includes(term)) &&
-            (!filters.platform || row.dataset.platform.toLocaleLowerCase('de-DE').split(' ').includes(filters.platform.toLocaleLowerCase('de-DE'))) &&
+            (!filters.platform || row.dataset.platform === filters.platform) &&
             (!filters.version || row.dataset.version === filters.version) &&
             (!filters.status || row.dataset.status === filters.status) &&
             (!filters.entryType || row.dataset.entryType === filters.entryType);
